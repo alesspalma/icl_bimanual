@@ -1,0 +1,34 @@
+method:
+    name: "RoboPromptAgentBimanual" # chooses the agent to use
+
+model:
+    llm_call_style: "openai"
+    name: "gpt-4-turbo"
+
+rlbench:
+    task_name: "close_jar"
+    cameras: [front,left_shoulder,right_shoulder,wrist] # overwritten at runtime in main.py
+    tasks: [close_jar]
+    demo_path: /my/demo/path
+    episode_length: 25
+    time_in_state: True
+    headless: True
+
+framework:
+    gpu: 0
+    logdir: /my/demo/logdir
+    seed: 333
+    start_seed: 0 # legacy, leave 0
+    record_every_n: 5
+    eval_envs: 1
+    eval_from_eps_number: 0
+    eval_episodes: 25
+    eval_save_metrics: True
+    repeat_eval: 1 # how many times to repeat the evaluation over each task, then report avg and std
+
+cinematic_recorder:
+    enabled: False
+    camera_resolution: [1280, 720]
+    fps: 30
+    rotate_speed: 0.005
+    save_path: './videos/'
