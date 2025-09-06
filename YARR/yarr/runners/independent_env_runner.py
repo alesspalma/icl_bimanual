@@ -120,7 +120,7 @@ class IndependentEnvRunner(EnvRunner):
             num_eval_runs=self._num_eval_runs)
 
         stat_accumulator = SimpleAccumulator(eval_video_fps=30)
-        result = self._internal_env_runner._run_eval_independent('eval_env',
+        result, avg_collisions = self._internal_env_runner._run_eval_independent('eval_env',
                                                         stat_accumulator,
                                                         weight,
                                                         writer_lock,
@@ -129,4 +129,4 @@ class IndependentEnvRunner(EnvRunner):
                                                         save_metrics,
                                                         cinematic_recorder_cfg)
         
-        return result
+        return result, avg_collisions

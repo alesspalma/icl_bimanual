@@ -106,7 +106,7 @@ class TaskEnvironment(object):
         if not self._reset_called:
             raise RuntimeError(
                 "Call 'reset' before calling 'step' on a task.")
-        self._action_mode.action(self._scene, action)
+        collisions = self._action_mode.action(self._scene, action)
         success, terminate = self._task.success()
         reward = float(success)
         if self._shaped_rewards:
@@ -115,7 +115,7 @@ class TaskEnvironment(object):
                 raise RuntimeError(
                     'User requested shaped rewards, but task %s does not have '
                     'a defined reward() function.' % self._task.get_name())
-        return self._scene.get_observation(), reward, terminate
+        return self._scene.get_observation(), reward, terminate, collisions
 
     def get_demos(self, amount: int, live_demos: bool = False,
                   image_paths: bool = False,

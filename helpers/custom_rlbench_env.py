@@ -222,7 +222,7 @@ class CustomRLBenchEnv(RLBenchEnv):
         obs = self._previous_obs_dict  # in case action fails.
 
         try:
-            obs, reward, terminal = self._task.step(action)
+            obs, reward, terminal, collisions = self._task.step(action)
             if reward >= 1:
                 success = True
                 reward *= self._reward_scale
@@ -269,7 +269,7 @@ class CustomRLBenchEnv(RLBenchEnv):
             summaries.append(
                 TextSummary("errors", f"Success: {success} | " + error_str)
             )
-        return Transition(obs, reward, terminal, summaries=summaries)
+        return Transition(obs, reward, terminal, summaries=summaries, collisions=collisions)
 
     def reset_to_demo(self, i):
         self._i = 0

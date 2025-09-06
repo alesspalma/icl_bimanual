@@ -25,6 +25,39 @@ import logging
 from abc import ABC
 
 
+def check_arm_to_arm_collision(scene):
+    all_objects = scene.pyrep.get_objects_in_tree()
+    collision = False
+    for obj in all_objects: # first check if grippers are colliding with the other arm
+        if "rightarm" in obj.get_name().lower():
+            collision = scene.robot.left_gripper.check_collision(obj)
+        elif "leftarm" in obj.get_name().lower():
+            collision = scene.robot.right_gripper.check_collision(obj)
+        if collision:
+            return True
+    if scene.robot.is_in_collision(): # then check if the body of an arm is colliding with the other arm
+        for obj in all_objects:
+            if "rightarm" in obj.get_name().lower():
+                collision = scene.robot.left_arm.check_arm_collision(obj)
+            elif "leftarm" in obj.get_name().lower():
+                collision = scene.robot.right_arm.check_arm_collision(obj)
+            else:
+                collision = scene.robot.left_arm.check_arm_collision(obj) or scene.robot.right_arm.check_arm_collision(obj)
+            if collision:
+                # print("-----------COLLISION WITH " + obj.get_name() + "-------------")
+                if "panda" in obj.get_name().lower():
+                    if scene.task.name == "bimanual_pick_plate": # bugfix for this task: detects an arm-to-arm collision when grasping the plate
+                        grasped_objects = scene.robot.right_gripper.get_grasped_objects() + scene.robot.left_gripper.get_grasped_objects()
+                        if "plate" in [s.get_name() for s in grasped_objects] or obj.get_name() in ["Panda_leftArm_leftfinger_respondable",
+                                                                                                    "Panda_leftArm_leftfinger_visual",
+                                                                                                    "Panda_leftArm_leftfinger_force_contact",
+                                                                                                    "Panda_leftArm_rightfinger_respondable",
+                                                                                                    "Panda_leftArm_rightfinger_visual",
+                                                                                                    "Panda_leftArm_rightfinger_force_contact"]:
+                            continue
+                    return True
+    return False
+
 
 def assert_action_shape(action: np.ndarray, expected_shape: tuple):
     if np.shape(action) != expected_shape:
@@ -415,7 +448,9 @@ class BimanualEndEffectorPoseViaPlanning(EndEffectorPoseViaPlanning):
 
 
     def action(self, scene: Scene, action: np.ndarray, ignore_collisions):
-
+        
+        collisions = 0
+        was_already_colliding = self.collision_from_prev_action
         assert_action_shape(action, self.action_shape(scene))
  
         right_action = action[:7]
@@ -461,10 +496,24 @@ class BimanualEndEffectorPoseViaPlanning(EndEffectorPoseViaPlanning):
             if self._callable_each_step is not None:
                 self._callable_each_step(scene.get_observation())
 
+            # count collisions
+            arm_to_arm_collision = check_arm_to_arm_collision(scene)
+            if arm_to_arm_collision and was_already_colliding <= 0:
+                collisions += 1
+                was_already_colliding = 75 # some steps of cooldown to have a safe window to avoid counting the same collision multiple times
+            elif arm_to_arm_collision and was_already_colliding > 0:
+                was_already_colliding -= 1
+            elif not arm_to_arm_collision:
+                was_already_colliding -= 1
+            #####################
+
             success, terminate = scene.task.success()
             # If the task succeeds while traversing path, then break early
             if success:
                 break
+        
+        self.collision_from_prev_action = was_already_colliding
+        return collisions
     
     def action_shape(self, scene: Scene) -> tuple:
         return 14,

@@ -7,12 +7,13 @@ from yarr.agents.agent import Summary
 class Transition(object):
 
     def __init__(self, observation: dict, reward: float, terminal: bool,
-                 info: dict = None, summaries: List[Summary] = None):
+                 info: dict = None, summaries: List[Summary] = None, collisions: int = 0):
         self.observation = observation
         self.reward = reward
         self.terminal = terminal
         self.info = info or {}
         self.summaries = summaries or []
+        self.collisions = collisions
 
 
 class ReplayTransition(object):
@@ -21,7 +22,8 @@ class ReplayTransition(object):
                  reward: float, terminal: bool, timeout: bool,
                  final_observation: dict = None,
                  summaries: List[Summary] = None,
-                 info: dict = None):
+                 info: dict = None,
+                 collisions: int = 0):
         self.observation = observation
         self.action = action
         self.reward = reward
@@ -31,3 +33,4 @@ class ReplayTransition(object):
         self.final_observation = final_observation
         self.summaries = summaries or []
         self.info = info
+        self.collisions = collisions

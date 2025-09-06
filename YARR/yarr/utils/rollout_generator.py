@@ -19,6 +19,8 @@ class RolloutGenerator(object):
                   eval: bool, eval_demo_seed: int = 0,
                   record_enabled: bool = False):
 
+        env._task._action_mode.arm_action_mode.collision_from_prev_action = 0
+
         if eval:
             obs = env.reset_to_demo(eval_demo_seed)
         else:
@@ -70,7 +72,7 @@ class RolloutGenerator(object):
             replay_transition = ReplayTransition(
                 obs_and_replay_elems, act_result.action, transition.reward,
                 transition.terminal, timeout, summaries=transition.summaries,
-                info=transition.info) # mainly useful for evaluation only
+                info=transition.info, collisions=transition.collisions) # mainly useful for evaluation only
 
             if transition.terminal or timeout:
                 if transition.terminal:

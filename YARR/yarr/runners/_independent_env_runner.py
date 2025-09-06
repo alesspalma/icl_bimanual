@@ -118,6 +118,7 @@ class _IndependentEnvRunner(_EnvRunner):
                               save_metrics=True,
                               cinematic_recorder_cfg=None):
 
+        total_collisions = 0
         self._name = name
         self._save_metrics = save_metrics
         self._is_test_set = type(weight) == dict
@@ -234,6 +235,7 @@ class _IndependentEnvRunner(_EnvRunner):
                         new_transitions['eval_envs'] += 1
                         total_transitions['eval_envs'] += 1
                         stats_accumulator.step(transition, eval) # step will extract the reward and update the stats accumulator
+                        total_collisions += transition.collisions
                         current_task_id = transition.info['active_task_id']
 
                 self._num_eval_episodes_signal.value += 1
@@ -293,7 +295,7 @@ class _IndependentEnvRunner(_EnvRunner):
         logging.info('Finished evaluation.')
         env.shutdown()
 
-        return task_score
+        return task_score, total_collisions/self._eval_episodes
 
     def kill(self):
         self._kill_signal.value = True

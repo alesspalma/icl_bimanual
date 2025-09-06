@@ -128,7 +128,7 @@ def eval_seed(eval_cfg,
     save_load_lock = manager.Lock()
     writer_lock = manager.Lock()
     
-    result = env_runner.start({"task": 0}, save_load_lock, writer_lock,
+    result, avg_collisions = env_runner.start({"task": 0}, save_load_lock, writer_lock,
                               env_config, 0,
                               eval_cfg.framework.eval_save_metrics,
                               eval_cfg.cinematic_recorder)
@@ -138,12 +138,13 @@ def eval_seed(eval_cfg,
     gc.collect()
     torch.cuda.empty_cache()
 
-    return result
+    return result, avg_collisions
 
 
 @hydra.main(config_name='config', config_path='.')
 def main(eval_cfg: DictConfig) -> None:
     results_list = []
+    collisions_list = []
     for i in range(eval_cfg.framework.repeat_eval):
         print(f"---------------------REPETITION NUMBER {i+1}---------------------")
         set_all_seeds(eval_cfg.framework.seed + i)
@@ -213,19 +214,22 @@ def main(eval_cfg: DictConfig) -> None:
                         eval_cfg.rlbench.time_in_state,
                         eval_cfg.framework.record_every_n)
 
-        logging.info('Evaluating seed %d.' % eval_cfg.framework.seed)
-        result = eval_seed(eval_cfg,
+        logging.info('Evaluating seed %d.' % (eval_cfg.framework.seed + i))
+        result, avg_collisions = eval_seed(eval_cfg,
                     logdir,
                     eval_cfg.rlbench.cameras,
                     env_device,
                     multi_task, start_seed,
                     env_config)
         results_list.append(result)
+        collisions_list.append(avg_collisions)
 
     # report avg and std of the experiments
     print("\n\nFinal results:")
     print("Average:", np.mean(results_list))
     print("Std:", np.std(results_list))
+    print("Average Collisions:", np.mean(collisions_list))
+    print("Std Collisions:", np.std(collisions_list))
 
 if __name__ == '__main__':
     main()
