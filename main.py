@@ -2,6 +2,7 @@ import gc
 import logging
 import os
 import random
+import time
 import numpy as np
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
@@ -133,8 +134,11 @@ def eval_seed(eval_cfg,
                               eval_cfg.framework.eval_save_metrics,
                               eval_cfg.cinematic_recorder)
 
-    del env_runner
-    del agent
+    # Delete objects in the reverse order they were created
+    del save_load_lock, writer_lock, manager  # Delete multiprocessing objects
+    del env_runner  # Delete the runner which contains references to other objects
+    del stat_accum, rg  # Delete supporting objects
+    del agent  # Delete the agent last after everything that referenced it
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -147,6 +151,7 @@ def main(eval_cfg: DictConfig) -> None:
     collisions_list = []
     for i in range(eval_cfg.framework.repeat_eval):
         print(f"---------------------REPETITION NUMBER {i+1}---------------------")
+        time.sleep(5)
         set_all_seeds(eval_cfg.framework.seed + i)
 
         logging.info('\n' + OmegaConf.to_yaml(eval_cfg))

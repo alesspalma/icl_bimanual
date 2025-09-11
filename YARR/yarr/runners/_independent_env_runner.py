@@ -278,7 +278,7 @@ class _IndependentEnvRunner(_EnvRunner):
             else:
                 task_score = "unknown"
 
-            print(f"Finished {eval_task_name} | Final Score: {task_score}\n")
+            print(f"Finished {eval_task_name} | Final Score: {task_score} | Avg collisions: {total_collisions/self._eval_episodes}\n")
 
             if self._save_metrics:
                 with writer_lock:

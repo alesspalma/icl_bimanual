@@ -187,7 +187,7 @@ def get_bimanual_tasks():
 @filepath_option("--save_path", default="/tmp/rlbench_data/",  help="Where to save the demos.")
 @choice_option('--tasks', type=click.Choice(get_bimanual_tasks()), multiple=True, help='The tasks to collect. If empty, all tasks are collected.')
 @click.option("--episodes_per_task", default=10, help="The number of episodes to collect per task.", prompt="Number of episodes")
-@click.option("--no_self_collisions", type=bool, default=False, help="Discard episodes that contain arm-to-arm collisions", prompt="Discard episodes with arm-to-arm collisions?")
+@click.option("--no_self_collisions", type=bool, default=True, help="Discard episodes that contain arm-to-arm collisions", prompt="Discard episodes with arm-to-arm collisions?")
 @click.option("--all_variations", is_flag=True, default=True, help="Include all variations when sampling epsiodes")
 #@click.option("--variations", default=-1, help="Number of variations to collect per task. -1 for all.")
 @click.option("--headless/--no-headless", default=True, is_flag=True, help='Hide the simulator window')
