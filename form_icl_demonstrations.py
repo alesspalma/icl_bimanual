@@ -18,9 +18,9 @@ from utils import _image_to_float_array, normalize_quaternion, point_to_voxel_in
 from helpers.demo_loading_utils import keypoint_discovery
 
 ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train" # TODO: change this
-SYSTEM_PROMPT = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a sequence of actions that matches the trend in the demos. Do not output anything else."
-SYSTEM_PROMPT_RIGHT = "You are the right arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a sequence of actions that matches the trend in the demos. Do not output anything else."
-SYSTEM_PROMPT_LEFT = "You are the left arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a sequence of actions that matches the trend in the demos. Do not output anything else."
+SYSTEM_PROMPT = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
+SYSTEM_PROMPT_RIGHT = "You are the right arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
+SYSTEM_PROMPT_LEFT = "You are the left arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 
 
 # discretize translation, rotation, gripper open

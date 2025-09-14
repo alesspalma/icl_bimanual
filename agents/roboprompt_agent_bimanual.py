@@ -108,6 +108,8 @@ class RoboPromptAgentBimanual(Agent):
                     try:
                         actions = np.array(json.loads(output_text))
                     except JSONDecodeError:
+                        if "\n" in output_text:
+                            output_text = output_text.replace("\n", ",")
                         if (not output_text.startswith('[[')) and output_text.endswith(']]'):
                             output_text = output_text[:-1]  # Remove misaligned trailing ]
                         elif output_text.startswith('[[') and (not output_text.endswith(']]')):
