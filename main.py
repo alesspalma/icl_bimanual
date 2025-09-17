@@ -4,6 +4,7 @@ import os
 import random
 import time
 import numpy as np
+os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 import hydra
