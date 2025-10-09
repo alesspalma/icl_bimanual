@@ -215,6 +215,7 @@ class RoboPromptAgentBimanual(Agent):
             model = LLM(
                 model=self.model_config.name,
                 max_num_seqs=1, # allowed batch size, influences also the warmup gpu space
+                gpu_memory_utilization=0.8, # fraction of gpu memory to use
             )
             tokenizer = AutoTokenizer.from_pretrained(self.model_config.name)
             self.llm_call = lambda messages: vllm_call(model, tokenizer, messages)
