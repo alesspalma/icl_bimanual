@@ -220,8 +220,8 @@ class base_task_handler:
         path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm"]:
-            examples = demonstration.split(", {")
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext"]:
+            examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
             for i, example in enumerate(examples):
@@ -233,9 +233,13 @@ class base_task_handler:
                 actions_list = json.loads(actions_list)
                 right_actions = []
                 left_actions = []
-                for action in actions_list:
-                    right_actions.append(action[:7])
-                    left_actions.append(action[7:])
+                for j, action in enumerate(actions_list):
+                    if type(agent).__name__ == "OnePerArmDummyContext":
+                        right_actions.append(action[:7]+[j]*7)
+                        left_actions.append(action[7:]+[j]*7)
+                    else:
+                        right_actions.append(action[:7])
+                        left_actions.append(action[7:])
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             

@@ -16,8 +16,8 @@ for method in "${methods[@]}"; do
     xvfb-run -a -s "-screen 0 1280x1024x24" \
     python main.py \
         method.name="$agent" \
-        model.llm_call_style=openai \
-        model.name=gpt-4.1-mini \
+        model.llm_call_style=huggingface \
+        model.name=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8 \
         rlbench.tasks="[$method]" \
         rlbench.task_name="$method" \
         rlbench.episode_length=25 \

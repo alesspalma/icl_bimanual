@@ -7,3 +7,4 @@ __pycache__/
 redirections/
 logs/
 /*.txt
+debug.py

@@ -19,6 +19,7 @@ from pyrep.const import RenderMode
 
 from agents.roboprompt_agent_bimanual import RoboPromptAgentBimanual
 from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
+from agents.oneperarm_dummycontext import OnePerArmDummyContext
 from yarr.runners.independent_env_runner import IndependentEnvRunner
 from yarr.utils.stat_accumulator import SimpleAccumulator
 from yarr.utils.rollout_generator import RolloutGenerator
@@ -31,7 +32,8 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 
 agent_classes = {
     "RoboPromptAgentBimanual": RoboPromptAgentBimanual,
-    "RoboPromptAgentOnePerArm": RoboPromptAgentOnePerArm
+    "RoboPromptAgentOnePerArm": RoboPromptAgentOnePerArm,
+    "OnePerArmDummyContext": OnePerArmDummyContext,
 }
 
 def set_all_seeds(seed):
