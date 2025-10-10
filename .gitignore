@@ -8,3 +8,4 @@ redirections/
 logs/
 /*.txt
 debug.py
+docker/
