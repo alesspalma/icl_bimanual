@@ -9,15 +9,8 @@ from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
 from utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
 from openai import OpenAI
-from vllm import LLM, SamplingParams
 
-def vllm_call(model, tokenizer, messages):
-    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    outputs = model.generate(prompt, sampling_params=SamplingParams(max_tokens=1024))
-    return outputs[0].outputs[0].text
-
-def openai_call(model_name, messages):
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+def openai_call(client, model_name, messages):
     completion = client.chat.completions.create(
         model=model_name,
         messages=messages
@@ -210,7 +203,9 @@ class RoboPromptAgentOnePerArm(Agent):
         self.handler = create_task_handler(self.task_name)
         
         if self.model_config.llm_call_style == "openai":
-            self.llm_call = lambda messages: openai_call(self.model_config.name, messages)
+            print("using openai model")
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            self.llm_call = lambda messages: openai_call(client, self.model_config.name, messages)
         elif self.model_config.llm_call_style == "huggingface":
             from transformers import AutoModelForCausalLM, AutoTokenizer
             print("loading model from huggingface")
@@ -225,15 +220,13 @@ class RoboPromptAgentOnePerArm(Agent):
                 param.requires_grad = False # no fine-tuning
             self.llm_call = lambda messages: huggingface_call(model, tokenizer, messages)
         elif self.model_config.llm_call_style == "vllm":
-            from transformers import AutoTokenizer
-            print("loading model from vllm")
-            model = LLM(
-                model=self.model_config.name,
-                max_num_seqs=1, # allowed batch size, influences also the warmup gpu space
-                gpu_memory_utilization=0.8, # fraction of gpu memory to use
+            print("using remote vllm-served model")
+            client = OpenAI(
+                base_url=f"http://127.0.0.1:8000/v1",
+                api_key="password",
             )
-            tokenizer = AutoTokenizer.from_pretrained(self.model_config.name)
-            self.llm_call = lambda messages: vllm_call(model, tokenizer, messages)
+            model_name = "/leonardo_scratch/large/userexternal/apalma01/llm_models/" + self.model_config.name.split("/")[-1]
+            self.llm_call = lambda messages: openai_call(client, model_name, messages)
 
         return
 
