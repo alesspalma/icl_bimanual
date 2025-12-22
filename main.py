@@ -20,6 +20,8 @@ from pyrep.const import RenderMode
 from agents.roboprompt_agent_bimanual import RoboPromptAgentBimanual
 from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
 from agents.oneperarm_dummycontext import OnePerArmDummyContext
+from agents.leader_follower_fillin import LeaderFollowerFillIn
+from agents.leader_follower import LeaderFollower
 from yarr.runners.independent_env_runner import IndependentEnvRunner
 from yarr.utils.stat_accumulator import SimpleAccumulator
 from yarr.utils.rollout_generator import RolloutGenerator
@@ -34,6 +36,8 @@ agent_classes = {
     "RoboPromptAgentBimanual": RoboPromptAgentBimanual,
     "RoboPromptAgentOnePerArm": RoboPromptAgentOnePerArm,
     "OnePerArmDummyContext": OnePerArmDummyContext,
+    "LeaderFollowerFillIn": LeaderFollowerFillIn,
+    "LeaderFollower": LeaderFollower,
 }
 
 def set_all_seeds(seed):

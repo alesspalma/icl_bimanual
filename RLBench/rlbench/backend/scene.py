@@ -6,6 +6,7 @@ from pyrep.const import ObjectType
 from pyrep.errors import ConfigurationPathError
 from pyrep.objects import Dummy
 from pyrep.objects.shape import Shape
+from pyrep.objects.object import Object
 from pyrep.objects.vision_sensor import VisionSensor
 from pyrep.robots.arms.arm import Arm
 from pyrep.robots.arms.dual_panda import PandaLeft, PandaRight
@@ -23,7 +24,7 @@ from rlbench.backend.robot import UnimanualRobot
 from rlbench.backend.robot import BimanualRobot
 from rlbench.backend.spawn_boundary import SpawnBoundary
 from rlbench.backend.task import Task
-from rlbench.backend.utils import rgb_handles_to_mask
+from rlbench.backend.utils import rgb_handles_to_mask, SIM_NAME_TO_REAL_NAME, point_to_voxel_index
 from rlbench.demo import Demo
 from rlbench.noise_model import NoiseModel
 from rlbench.observation_config import ObservationConfig, CameraConfig
@@ -360,6 +361,16 @@ class Scene(object):
         misc_dict = self._get_misc()
         for key, value in temp_mask_id_to_name_dict.items():
             misc_dict[key] = value
+        
+        # Extract object positions for all relevant objects
+        object_positions = {}
+        for obj_name in SIM_NAME_TO_REAL_NAME[self.task.name]:
+            obj = Object.get_object(obj_name)
+            position = obj.get_position()
+            voxel = point_to_voxel_index(position)
+            object_positions[obj_name] = list(voxel)
+        misc_dict['object_positions'] = object_positions
+        
         observation_data.update({
             "task_low_dim_state": task_low_dim_state,
             "perception_data": perception_data,

@@ -5,10 +5,8 @@ import trimesh
 from pyrender.trackball import Trackball
 from rlbench.backend.const import DEPTH_SCALE
 from scipy.spatial.transform import Rotation
-from rlbench.backend.observation import Observation
-from rlbench import CameraConfig, ObservationConfig
-from pyrep.const import RenderMode
-from typing import List
+import matplotlib.pyplot as plt
+import open3d as o3d
 
 
 SCALE_FACTOR = DEPTH_SCALE
@@ -344,3 +342,113 @@ def get_device(gpu):
     else:
         device = torch.device("cpu")
     return device
+
+
+def visualize_point_cloud_to_file(point_cloud, output_path='point_cloud.png', axis_range=0.75):
+    """
+    Visualize a point cloud and save it as an image file.
+    
+    Args:
+        point_cloud: array of shape (128, 128, 3)
+        output_path: path where to save the image
+        axis_range: half-width of the axis range (default: 0.75, resulting in 1.5 total width)
+    """
+    # Reshape to (N, 3)
+    if len(point_cloud.shape) == 3:
+        points = point_cloud.reshape(-1, 3)
+    else:
+        points = point_cloud
+    
+    # Remove invalid points
+    valid_mask = ~np.isnan(points).any(axis=1) & ~np.isinf(points).any(axis=1)
+    points = points[valid_mask]
+    
+    # Calculate center of the point cloud
+    center = np.mean(points, axis=0)
+    
+    # Create figure with multiple views
+    fig = plt.figure(figsize=(15, 10))
+    
+    # 3D view
+    ax1 = fig.add_subplot(221, projection='3d')
+    ax1.scatter(points[:, 0], points[:, 1], points[:, 2], 
+                c='black', s=1, alpha=0.6)
+    ax1.scatter(center[0], center[1], center[2], 
+                c='red', s=10, marker='o', edgecolors='darkred', linewidths=2)
+    ax1.set_xlabel('X')
+    ax1.set_ylabel('Y')
+    ax1.set_zlabel('Z')
+    ax1.set_title('3D View')
+    ax1.set_xlim(center[0] - axis_range, center[0] + axis_range)
+    ax1.set_ylim(center[1] - axis_range, center[1] + axis_range)
+    ax1.set_zlim(center[2] - axis_range, center[2] + axis_range)
+    
+    # Top view (XY plane)
+    ax2 = fig.add_subplot(222)
+    ax2.scatter(points[:, 0], points[:, 1], c='black', s=1, alpha=0.6)
+    ax2.scatter(center[0], center[1], c='red', s=10, marker='o', 
+                edgecolors='darkred', linewidths=2)
+    ax2.set_xlabel('X')
+    ax2.set_ylabel('Y')
+    ax2.set_title('Top View (XY)')
+    ax2.set_aspect('equal')
+    ax2.set_xlim(center[0] - axis_range, center[0] + axis_range)
+    ax2.set_ylim(center[1] - axis_range, center[1] + axis_range)
+    
+    # Front view (XZ plane)
+    ax3 = fig.add_subplot(223)
+    ax3.scatter(points[:, 0], points[:, 2], c='black', s=1, alpha=0.6)
+    ax3.scatter(center[0], center[2], c='red', s=10, marker='o', 
+                edgecolors='darkred', linewidths=2)
+    ax3.set_xlabel('X')
+    ax3.set_ylabel('Z')
+    ax3.set_title('Front View (XZ)')
+    ax3.set_aspect('equal')
+    ax3.set_xlim(center[0] - axis_range, center[0] + axis_range)
+    ax3.set_ylim(center[2] - axis_range, center[2] + axis_range)
+    
+    # Side view (YZ plane)
+    ax4 = fig.add_subplot(224)
+    ax4.scatter(points[:, 1], points[:, 2], c='black', s=1, alpha=0.6)
+    ax4.scatter(center[1], center[2], c='red', s=10, marker='o', 
+                edgecolors='darkred', linewidths=2)
+    ax4.set_xlabel('Y')
+    ax4.set_ylabel('Z')
+    ax4.set_title('Side View (YZ)')
+    ax4.set_aspect('equal')
+    ax4.set_xlim(center[1] - axis_range, center[1] + axis_range)
+    ax4.set_ylim(center[2] - axis_range, center[2] + axis_range)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Point cloud visualization saved to {output_path}")
+
+    # Usage example:
+    # point_cloud = point_cloud_dict['front']  # shape (128, 128, 3)
+    # visualize_point_cloud_to_file(point_cloud, 'my_point_cloud.png')
+
+def visualize_point_cloud_live(point_cloud):
+    """
+    Visualize a point cloud interactively using Open3D.
+    
+    Args:
+        point_cloud: array of shape (128, 128, 3)
+    """
+    # Reshape to (N, 3) where N = 128*128
+    points = point_cloud.reshape(-1, 3)
+
+    # Create point cloud object
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+
+    # Estimate normals first
+    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
+    # Color by normals (converts normal directions to RGB)
+    colors = np.asarray(pcd.normals)
+    colors = (colors + 1) / 2  # Normalize from [-1,1] to [0,1]
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    # Visualize interactively
+    o3d.visualization.draw_geometries([pcd])

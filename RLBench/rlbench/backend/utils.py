@@ -229,3 +229,73 @@ def rgb_handles_to_mask(rgb_coded_handles):
   return (rgb_coded_handles[:, :, 0] +
           rgb_coded_handles[:, :, 1] * 256 +
           rgb_coded_handles[:, :, 2] * 256 * 256)
+
+#########################################################################
+
+SCENE_BOUNDS = np.array([-0.3, -0.5, 0.6, 0.7, 0.5, 1.6])
+VOXEL_SIZE = 100
+
+def point_to_voxel_index(
+        point: np.ndarray):
+    bb_mins = np.array(SCENE_BOUNDS[0:3])[None]
+    bb_maxs = np.array(SCENE_BOUNDS[3:])[None]
+    dims_m_one = np.array([VOXEL_SIZE] * 3)[None] - 1
+    bb_ranges = bb_maxs - bb_mins
+    res = bb_ranges / (np.array([VOXEL_SIZE] * 3) + 1e-12)
+    voxel_indicy = np.minimum(
+        np.floor((point - bb_mins) / (res + 1e-12)).astype(
+            np.int32), dims_m_one)
+    return voxel_indicy.reshape(point.shape)
+
+SIM_NAME_TO_REAL_NAME = {
+    "bimanual_push_box": {
+        "cube": "box",
+    },
+    "bimanual_dual_push_buttons": {
+        "target_button_wrap0": "button 1",
+        "target_button_wrap1": "button 2",
+        "target_button_wrap2": "button 3"
+    },
+    "bimanual_put_bottle_in_fridge": {
+        "fridge_base_visual": "fridge",
+        "bottle_visual": "bottle"
+    },
+    "bimanual_handover_item": {
+        "item0": "item 1",
+        "item1": "item 2",
+        "item2": "item 3",
+        "item3": "item 4",
+        "item4": "item 5"
+    },
+    "bimanual_handover_item_easy": {
+        "item": "item",
+    },
+    "bimanual_lift_ball": {
+        "ball": "ball",
+    },
+    "bimanual_lift_tray": {
+        "tray_visual": "tray",
+    },
+    "bimanual_pick_laptop": {
+        "lid_visual": "laptop",
+    },
+    "bimanual_pick_plate": {
+        "plate_visual": "plate",
+    },
+    "bimanual_straighten_rope": {
+        "tail": "rope",
+        "head_tail": "target 1",
+        "head_target": "target 2"
+    },
+    "bimanual_sweep_to_dustpan": {
+        "sweep_to_dustpan_broom_visual": "broom",
+        "Dustpan_5": "dustpan"
+    },
+    "bimanual_take_tray_out_of_oven": {
+        "oven_frame0": "oven",
+    },
+    "bimanual_put_item_in_drawer": {
+        "drawer_frame": "drawer",
+        "item": "item"
+    },
+}

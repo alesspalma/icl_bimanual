@@ -4,6 +4,8 @@ method:
 model:
     llm_call_style: "openai"
     name: "gpt-4-turbo"
+    leader: "right"  # "right" or "left"
+    use_gt_obj_pos: False  # whether to use ground truth object positions at test time
 
 rlbench:
     task_name: "close_jar"

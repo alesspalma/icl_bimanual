@@ -1,3 +1,4 @@
+import argparse
 import copy
 import glob
 import itertools
@@ -10,17 +11,22 @@ from typing import List
 import numpy as np
 from PIL import Image
 from pyrep.objects import VisionSensor
+from pyrep.objects.object import Object
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 import json
 
 from utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS
 from helpers.demo_loading_utils import keypoint_discovery
+from helpers.utils import visualize_point_cloud_to_file
 
 ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train" # TODO: change this
 SYSTEM_PROMPT = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 SYSTEM_PROMPT_RIGHT = "You are the right arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 SYSTEM_PROMPT_LEFT = "You are the left arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
+# SYSTEM_PROMPT_FOLLOWER_FILLIN = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Each action is the concatenation of the right arm and left arm actions. Then you will receive the last observation only with the right arm actions, and you need to replace ALL the X with the left arm actions matching the trend in the demos. Do not output anything else than the completed last list."
+SYSTEM_PROMPT_FOLLOWER_FILLIN = "You are a bimanual robot. Demos are in the format: observation>[action_list]. Each action in the list is 14 numbers: [7_right_arm_numbers, 7_left_arm_numbers]. You will be given the last observation with a partial list with X for the left arm. Fill in the X values. Output ONLY the completed list."
+SYSTEM_PROMPT_FOLLOWER = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 
 
 # discretize translation, rotation, gripper open
@@ -83,7 +89,8 @@ def _add_keypoints_to_replay(
         episode_keypoints,
         epis_path_depth,
         epis_path_char,
-        sim_name_to_real_name
+        sim_name_to_real_name,
+        use_gt_pos
     ):
     prev_action = None
     cur_index = i
@@ -103,7 +110,25 @@ def _add_keypoints_to_replay(
     if len(sim_name_to_real_name) != len(mask_id_to_real_name):
         print(f"WARNING objects not found: {set(sim_name_to_real_name.values()) - set(mask_id_to_real_name.values())}")
 
-    avg_coord = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
+    if use_gt_pos:
+        avg_coord = form_obs_gt(demo, cur_index, sim_name_to_real_name)
+    else:
+        avg_coord = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
+        # avg_coord = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
+    # sort avg_coord alphabetically by key
+    avg_coord = str({k: eval(avg_coord)[k] for k in sorted(eval(avg_coord))})
+    
+    ####### for statistics
+    avg_coord_gt = eval(form_obs_gt(demo, cur_index, sim_name_to_real_name))
+    avg_coord_std = eval(form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict))
+    avg_coord_concat = eval(form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict))
+
+    diff_gt_std = {}
+    diff_gt_conc = {}
+    for key in avg_coord_gt:
+        diff_gt_std[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_std[key]))
+        diff_gt_conc[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_concat[key]))
+    #######
 
     buffer.append(avg_coord) # appends center coordinates of the objects in the scene
     actions = []
@@ -119,6 +144,7 @@ def _add_keypoints_to_replay(
         actions.append(action_right + action_left)
     
     buffer.append(actions) # appends actions taken at each keyframe
+    return diff_gt_std, diff_gt_conc
 
 def _is_stopped(demo, i, obs, stopped_buffer, delta=0.1):
     next_is_not_final = i == (len(demo) - 2)
@@ -151,10 +177,11 @@ def _keypoint_discovery(demo, delta=0.1) -> List[int]:
     #print('Found %d keypoints.' % len(episode_keypoints), episode_keypoints)
     return episode_keypoints
 
-def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name):
+def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use_gt_pos):
     total_num_keypoints = 0
     buffer = []
     task_root = os.path.join(dataset_root, task_name, 'all_variations', 'episodes')
+    tot_diff_gt_std, tot_diff_gt_conc = {}, {}
 
     for epi_id in tqdm(range(amount)):
         epis_path_depth = os.path.join(task_root, f'episode{epi_id}')
@@ -172,11 +199,40 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name):
         episode_keypoints = keypoint_discovery(demo) # _keypoint_discovery(demo) # extract indices of keyframes in the demo
 
         tmp = []
-        _add_keypoints_to_replay(
-            tmp, 0, demo, episode_keypoints, epis_path_depth, epis_path_char, sim_name_to_real_name)
+        diff_gt_std, diff_gt_conc = _add_keypoints_to_replay(
+            tmp, 0, demo, episode_keypoints, epis_path_depth, epis_path_char, sim_name_to_real_name, use_gt_pos)
         buffer.append(tmp)
+
+        # accumulate statistics
+        for key in diff_gt_std:
+            tot_diff_gt_std[key] = tot_diff_gt_std.get(key, 0) + diff_gt_std[key]
+            tot_diff_gt_conc[key] = tot_diff_gt_conc.get(key, 0) + diff_gt_conc[key]
+
+    # average distances
+    for key in tot_diff_gt_std:
+        tot_diff_gt_std[key] = round(tot_diff_gt_std[key] / amount, 3)
+        tot_diff_gt_conc[key] = round(tot_diff_gt_conc[key] / amount, 3)
+
     print("Average number of steps: ", sum([len(each[1]) for each in buffer])/len(buffer))
+    print("Task", task_name, "\navg diff gt std:", tot_diff_gt_std, "\navg diff gt conc:", tot_diff_gt_conc, "\n")
     return buffer
+
+def form_obs_gt(demo, cur_index, sim_name_to_real_name):
+    real_name_to_avg_coord = {}
+    for sim_name, real_name in sim_name_to_real_name.items():
+        obj_pos = demo[cur_index].misc['object_positions'][sim_name]
+        real_name_to_avg_coord[real_name] = obj_pos
+    return str(real_name_to_avg_coord)
+
+def form_obs_gt_test(sim_name_to_real_name):
+    # Extract gt object positions from live simulation
+    object_positions = {}
+    for sim_name in sim_name_to_real_name:
+        obj = Object.get_object(sim_name)
+        position = obj.get_position()
+        voxel = point_to_voxel_index(position)
+        object_positions[sim_name_to_real_name[sim_name]] = list(voxel)
+    return str(object_positions)
 
 def form_obs(
     mask_dict,
@@ -195,11 +251,42 @@ def form_obs(
             point_cloud = point_cloud_dict[camera] # take the point cloud from that camera
             if not np.any(mask == mask_id): # if the object is visible in that camera
                 continue
-            avg_point_list.append(np.mean(point_cloud[mask == mask_id].reshape(-1, 3), axis = 0)) # take the average point (center) in the point cloud for that object
+            object_points = point_cloud[mask == mask_id].reshape(-1, 3)
+            avg_point_list.append(np.mean(object_points, axis = 0)) # take the average point (center) in the point cloud for that object
 
         avg_point = sum(avg_point_list) / len(avg_point_list) # take average of the centers
         real_name = mask_id_to_real_name[mask_id]
         real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+    return str(real_name_to_avg_coord)
+
+def form_obs_concatenate_clouds(
+    mask_dict,
+    mask_id_to_real_name,
+    point_cloud_dict):
+    # Merge point clouds from all cameras first, then compute center
+    
+    uniques = np.unique(np.concatenate(list(mask_dict.values()), axis=0))
+    real_name_to_avg_coord = {}
+    for _, mask_id in enumerate(uniques):
+        if mask_id not in mask_id_to_real_name: # for each object id I am interested in
+            continue
+        
+        # Collect all points for this object from all cameras
+        all_object_points = []
+        for camera in CAMERAS: # for each camera
+            mask = mask_dict[camera] # take the mask from that camera
+            point_cloud = point_cloud_dict[camera] # take the point cloud from that camera
+            if not np.any(mask == mask_id): # if the object is visible in that camera
+                continue
+            object_points = point_cloud[mask == mask_id].reshape(-1, 3)
+            all_object_points.append(object_points)
+        
+        # Merge all points from different cameras and compute center once
+        merged_points = np.concatenate(all_object_points, axis=0)
+        avg_point = np.mean(merged_points, axis=0)
+        real_name = mask_id_to_real_name[mask_id]
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+    
     return str(real_name_to_avg_coord)
 
 class base_task_handler:
@@ -214,13 +301,19 @@ class base_task_handler:
         assert os.path.exists(self.save_root), f"Cannot find save root {self.save_root}"
         mask_id_to_real_name = {mask_id: self.sim_name_to_real_name[name] for mask_id, name in mask_id_to_sim_name.items()
                             if name in self.sim_name_to_real_name}
-        obs = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
+        if agent.model_config.use_gt_obj_pos:
+            obs = form_obs_gt_test(self.sim_name_to_real_name)
+        else:
+            obs = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
+            # obs = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
+        # sort obs alphabetically by key
+        obs = str({k: eval(obs)[k] for k in sorted(eval(obs))})
 
         # during evaluation, randomly choose one batch of 10 demonstrations from the saved demonstrations
         path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext"]:
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext", "LeaderFollowerFillIn", "LeaderFollower"]:
             examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
@@ -243,13 +336,14 @@ class base_task_handler:
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             
+            if type(agent).__name__ in ["LeaderFollowerFillIn", "LeaderFollower"]:
+                return right_demonstration + obs + ">", left_demonstration + obs + ">", demonstration + obs + ">"
             return right_demonstration + obs + ">", left_demonstration + obs + ">"
 
         return demonstration + obs + ">"
     
-    def save_in_context_demonstrations(self):
-        train_demos = get_stored_demos(ROOT, type(self).__name__, 100, self.sim_name_to_real_name)
-
+    def save_in_context_demonstrations(self, use_gt_pos):
+        train_demos = get_stored_demos(ROOT, type(self).__name__, 100, self.sim_name_to_real_name, use_gt_pos)
         # iterate over 100 demonstrations, each time take 10 demonstrations
         for i, start_idx in enumerate(range(0, len(train_demos), self.num_demos)):
             if start_idx + self.num_demos <= len(train_demos):
@@ -509,8 +603,8 @@ class bimanual_put_item_in_drawer(base_task_handler):
         super().__init__(sim_name_to_real_name)
 
 task_name_to_handler = {
-                        "bimanual_dual_push_buttons": bimanual_dual_push_buttons,
                         "bimanual_handover_item": bimanual_handover_item,
+                        "bimanual_dual_push_buttons": bimanual_dual_push_buttons,
                         "bimanual_handover_item_easy": bimanual_handover_item_easy,
                         "bimanual_lift_ball": bimanual_lift_ball,
                         "bimanual_lift_tray": bimanual_lift_tray,
@@ -528,7 +622,15 @@ def create_task_handler(task_name):
     return task_name_to_handler[task_name]()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Generate in-context learning examples')
+    parser.add_argument('--gt_pos', action='store_true', help='Use ground truth object positions (default: False)')
+    args = parser.parse_args()
+    
+    use_gt_positions = args.gt_pos
+    if use_gt_positions:
+        print("Using GT object positions")
+    
     for class_name in task_name_to_handler.values():
         handler = class_name()
-        handler.save_in_context_demonstrations()
+        handler.save_in_context_demonstrations(use_gt_positions)
 
