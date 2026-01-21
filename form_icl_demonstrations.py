@@ -15,10 +15,10 @@ from pyrep.objects.object import Object
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 import json
-
+import open3d as o3d
 from utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS
 from helpers.demo_loading_utils import keypoint_discovery
-from helpers.utils import visualize_point_cloud_to_file
+from helpers.utils import visualize_point_cloud_to_file, visualize_point_cloud_live
 
 ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train" # TODO: change this
 SYSTEM_PROMPT = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
@@ -113,8 +113,9 @@ def _add_keypoints_to_replay(
     if use_gt_pos:
         avg_coord = form_obs_gt(demo, cur_index, sim_name_to_real_name)
     else:
-        avg_coord = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
+        # avg_coord = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
         # avg_coord = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
+        avg_coord = form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict)
     # sort avg_coord alphabetically by key
     avg_coord = str({k: eval(avg_coord)[k] for k in sorted(eval(avg_coord))})
     
@@ -122,12 +123,15 @@ def _add_keypoints_to_replay(
     avg_coord_gt = eval(form_obs_gt(demo, cur_index, sim_name_to_real_name))
     avg_coord_std = eval(form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict))
     avg_coord_concat = eval(form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict))
+    avg_coord_prune = eval(form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict))
 
     diff_gt_std = {}
     diff_gt_conc = {}
+    diff_gt_prune = {}
     for key in avg_coord_gt:
         diff_gt_std[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_std[key]))
         diff_gt_conc[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_concat[key]))
+        diff_gt_prune[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_prune[key]))
     #######
 
     buffer.append(avg_coord) # appends center coordinates of the objects in the scene
@@ -144,7 +148,7 @@ def _add_keypoints_to_replay(
         actions.append(action_right + action_left)
     
     buffer.append(actions) # appends actions taken at each keyframe
-    return diff_gt_std, diff_gt_conc
+    return diff_gt_std, diff_gt_conc, diff_gt_prune
 
 def _is_stopped(demo, i, obs, stopped_buffer, delta=0.1):
     next_is_not_final = i == (len(demo) - 2)
@@ -181,7 +185,7 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use
     total_num_keypoints = 0
     buffer = []
     task_root = os.path.join(dataset_root, task_name, 'all_variations', 'episodes')
-    tot_diff_gt_std, tot_diff_gt_conc = {}, {}
+    tot_diff_gt_std, tot_diff_gt_conc, tot_diff_gt_prune = {}, {}, {}
 
     for epi_id in tqdm(range(amount)):
         epis_path_depth = os.path.join(task_root, f'episode{epi_id}')
@@ -199,7 +203,7 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use
         episode_keypoints = keypoint_discovery(demo) # _keypoint_discovery(demo) # extract indices of keyframes in the demo
 
         tmp = []
-        diff_gt_std, diff_gt_conc = _add_keypoints_to_replay(
+        diff_gt_std, diff_gt_conc, diff_gt_prune = _add_keypoints_to_replay(
             tmp, 0, demo, episode_keypoints, epis_path_depth, epis_path_char, sim_name_to_real_name, use_gt_pos)
         buffer.append(tmp)
 
@@ -207,14 +211,16 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use
         for key in diff_gt_std:
             tot_diff_gt_std[key] = tot_diff_gt_std.get(key, 0) + diff_gt_std[key]
             tot_diff_gt_conc[key] = tot_diff_gt_conc.get(key, 0) + diff_gt_conc[key]
+            tot_diff_gt_prune[key] = tot_diff_gt_prune.get(key, 0) + diff_gt_prune[key]
 
     # average distances
     for key in tot_diff_gt_std:
         tot_diff_gt_std[key] = round(tot_diff_gt_std[key] / amount, 3)
         tot_diff_gt_conc[key] = round(tot_diff_gt_conc[key] / amount, 3)
+        tot_diff_gt_prune[key] = round(tot_diff_gt_prune[key] / amount, 3)
 
     print("Average number of steps: ", sum([len(each[1]) for each in buffer])/len(buffer))
-    print("Task", task_name, "\navg diff gt std:", tot_diff_gt_std, "\navg diff gt conc:", tot_diff_gt_conc, "\n")
+    print("Task", task_name, "\navg diff gt std:", tot_diff_gt_std, "\navg diff gt conc:", tot_diff_gt_conc, "\navg diff gt prune:", tot_diff_gt_prune, "\n")
     return buffer
 
 def form_obs_gt(demo, cur_index, sim_name_to_real_name):
@@ -289,6 +295,39 @@ def form_obs_concatenate_clouds(
     
     return str(real_name_to_avg_coord)
 
+def form_obs_prune_points(
+    mask_dict,
+    mask_id_to_real_name,
+    point_cloud_dict):
+    # Merge point clouds from all cameras first, then remove crowded areas and compute center
+    
+    uniques = np.unique(np.concatenate(list(mask_dict.values()), axis=0))
+    real_name_to_avg_coord = {}
+    for _, mask_id in enumerate(uniques):
+        if mask_id not in mask_id_to_real_name: # for each object id I am interested in
+            continue
+        
+        # Collect all points for this object from all cameras
+        all_object_points = []
+        for camera in CAMERAS: # for each camera
+            mask = mask_dict[camera] # take the mask from that camera
+            point_cloud = point_cloud_dict[camera] # take the point cloud from that camera
+            if not np.any(mask == mask_id): # if the object is visible in that camera
+                continue
+            object_points = point_cloud[mask == mask_id].reshape(-1, 3)
+            all_object_points.append(object_points)
+        
+        # Merge all points from different cameras and compute center once
+        merged_points = np.concatenate(all_object_points, axis=0)
+        pc = o3d.geometry.PointCloud()
+        pc.points = o3d.utility.Vector3dVector(merged_points)
+        pc = pc.voxel_down_sample(voxel_size=0.02)
+        avg_point = np.mean(np.asarray(pc.points), axis=0)
+        real_name = mask_id_to_real_name[mask_id]
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+    
+    return str(real_name_to_avg_coord)
+
 class base_task_handler:
     def __init__(self, sim_name_to_real_name):
         self.sim_name_to_real_name = sim_name_to_real_name
@@ -304,8 +343,9 @@ class base_task_handler:
         if agent.model_config.use_gt_obj_pos:
             obs = form_obs_gt_test(self.sim_name_to_real_name)
         else:
-            obs = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
+            # obs = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
             # obs = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
+            obs = form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict)
         # sort obs alphabetically by key
         obs = str({k: eval(obs)[k] for k in sorted(eval(obs))})
 
