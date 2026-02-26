@@ -3,8 +3,8 @@
 # Parameters
 log_dir="/home/alessio/Desktop/icl_bimanual/logs"
 test_data_path="/home/alessio/Desktop/icl_bimanual/generated_data/test"
-llm_call_style="vllm"
-agent="LeaderFollower"
+llm_call_style="openai"
+agent="RoboPromptAgentOnePerArm"
 mkdir -p "redirections/$llm_call_style/$agent"
 
 methods=("bimanual_dual_push_buttons" "bimanual_handover_item_easy" "bimanual_handover_item" "bimanual_lift_ball" "bimanual_lift_tray" "bimanual_pick_laptop" "bimanual_pick_plate" "bimanual_push_box" "bimanual_put_bottle_in_fridge" "bimanual_put_item_in_drawer" "bimanual_straighten_rope" "bimanual_sweep_to_dustpan" "bimanual_take_tray_out_of_oven")
@@ -18,7 +18,7 @@ for method in "${methods[@]}"; do
     python main.py \
         method.name="$agent" \
         model.llm_call_style="$llm_call_style" \
-        model.name=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8 \
+        model.name=gpt-5-mini \
         rlbench.tasks="[$method]" \
         rlbench.task_name="$method" \
         rlbench.episode_length=25 \

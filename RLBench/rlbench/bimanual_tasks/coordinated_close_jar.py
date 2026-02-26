@@ -36,11 +36,9 @@ class CoordinatedCloseJar(BimanualTask):
         self._variation_index = index
         b = SpawnBoundary([self.boundary])
         for obj in self.jars:
-            print(f"print sampling for jar {obj}")
             b.sample(obj, min_distance=0.01)
-        print("ok")
         success = ProximitySensor('success')
-        success.set_position([0.0, 0.0, 0.05], relative_to=self.jars[index % 2],
+        success.set_position([0.0, 0.0, 0.05], relative_to=self.jars[0],
                              reset_dynamics=False)
 
         w0 = Dummy('waypoint0')
@@ -51,7 +49,7 @@ class CoordinatedCloseJar(BimanualTask):
 
         w3 = Dummy('waypoint10')
         w3.set_orientation([-np.pi, 0, -np.pi], reset_dynamics=False)
-        w3.set_position([0.0, 0.0, 0.125], relative_to=self.jars[index % 2],
+        w3.set_position([0.0, 0.0, 0.125], relative_to=self.jars[0],
                         reset_dynamics=False)
         target_color_name, target_color_rgb = colors[index]
         color_choice = np.random.choice(
@@ -59,9 +57,8 @@ class CoordinatedCloseJar(BimanualTask):
                 range(index + 1, len(colors))),
             size=1, replace=False)[0]
         _, distractor_color_rgb = colors[color_choice]
-        self.jars[index % 2].set_color(target_color_rgb)
-        other_index = {0: 1, 1: 0}
-        self.jars[other_index[index % 2]].set_color(distractor_color_rgb)
+        self.jars[0].set_color(target_color_rgb)
+        self.jars[1].set_color(distractor_color_rgb)
         self.conditions += [DetectedCondition(self.lid, success)]
         self.register_success_conditions(self.conditions)
         return ['close the %s jar' % target_color_name,

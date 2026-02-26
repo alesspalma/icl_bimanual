@@ -37,13 +37,14 @@ def huggingface_call(model, tokenizer, messages):
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return response
 
-class LeaderFollower(Agent):
+class PingPong(Agent):
     def __init__(self, task_name, model_config):
         self.episode_id = -1
         self.device = 'cuda'
         self.task_name = task_name
         self.model_config = model_config
         self.leader = model_config.leader
+        self.follower = "left" if self.leader == "right" else "right"
 
     def _preprocess(self, obs, step, **kwargs):
         rgb_dict = {}
@@ -92,11 +93,12 @@ class LeaderFollower(Agent):
                     {"role": "user", "content": user_prompt_leader}
                 ]
             output_text_leader = self.llm_call(messages)
-            print(f"Prediction:", output_text_leader)
+            print(f"First Leader Prediction:", output_text_leader)
             output_list_leader = self._postprocess_single_arm(output_text_leader)
 
-            # now prepare the follower prompt
+            # now prepare both the follower prompt and the augmented leader prompt
             examples = user_prompt_bi.split(", {") # split over ICL episodes
+            user_prompt_leader_augmented = ""
             user_prompt_follower = ""
             for i, example in enumerate(examples[:-1]):
                 if i > 0:
@@ -111,6 +113,9 @@ class LeaderFollower(Agent):
                     left_actions.append(action[7:])
                 objects_dict[f'{self.leader}_arm'] = right_actions if self.leader == "right" else left_actions
                 user_prompt_follower += str(objects_dict) + ">" + str(left_actions if self.leader == "right" else right_actions) + ", "
+                del objects_dict[f'{self.leader}_arm']
+                objects_dict[f'{self.follower}_arm'] = right_actions if self.follower == "right" else left_actions
+                user_prompt_leader_augmented += str(objects_dict) + ">" + str(right_actions if self.follower == "left" else left_actions) + ", "
             # add last live obs with the leader prediction
             example = "{"+examples[-1]
             objects_dict, _ = example.split(">")
@@ -127,21 +132,56 @@ class LeaderFollower(Agent):
                     {"role": "user", "content": user_prompt_follower}
                 ]
             output_text_follower = self.llm_call(messages)
-            print(f"Prediction:", output_text_follower)
+            print(f"First Follower Prediction:", output_text_follower)
             output_list_follower = self._postprocess_single_arm(output_text_follower)
+
+            # now go again with the leader, but with the augmented prompt containing follower examples
+            del objects_dict[f'{self.leader}_arm']
+            objects_dict[f'{self.follower}_arm'] = output_list_follower
+            user_prompt_leader_augmented += str(objects_dict) + ">"
+
+            print(system_prompt_leader)
+            print()
+            print(user_prompt_leader_augmented)
+
+            messages = [
+                    {"role": "system", "content": system_prompt_leader},
+                    {"role": "user", "content": user_prompt_leader_augmented}
+                ]
+            refined_output_text_leader = self.llm_call(messages)
+            print(f"Refined Leader Prediction:", refined_output_text_leader)
+            refined_output_list_leader = self._postprocess_single_arm(refined_output_text_leader)
+
+            # now go again with the follower, but using the refined leader prediction for the last obs
+            del objects_dict[f'{self.follower}_arm']
+            objects_dict[f'{self.leader}_arm'] = refined_output_list_leader
+            user_prompt_follower = user_prompt_follower.rsplit(", {", 1)[0]+", "
+            user_prompt_follower += str(objects_dict) + ">"
+
+            print(SYSTEM_PROMPT_FOLLOWER)
+            print()
+            print(user_prompt_follower)
+
+            messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT_FOLLOWER},
+                    {"role": "user", "content": user_prompt_follower}
+                ]
+            refined_output_text_follower = self.llm_call(messages)
+            print(f"Refined Follower Prediction:", refined_output_text_follower)
+            refined_output_list_follower = self._postprocess_single_arm(refined_output_text_follower)
 
             # now combine leader and follower discrete actions
             combined_actions = []
             # first match length of the leader and follower outputs -> make the shorter equal to the longer by repeating last action
-            len_leader = len(output_list_leader)
-            len_follower = len(output_list_follower)
+            len_leader = len(refined_output_list_leader)
+            len_follower = len(refined_output_list_follower)
             if len_leader > len_follower:
                 for _ in range(len_leader - len_follower):
-                    output_list_follower.append(output_list_follower[-1])
+                    refined_output_list_follower.append(refined_output_list_follower[-1])
             elif len_follower > len_leader:
                 for _ in range(len_follower - len_leader):
-                    output_list_leader.append(output_list_leader[-1])
-            for leader_action, follower_action in zip(output_list_leader, output_list_follower):
+                    refined_output_list_leader.append(refined_output_list_leader[-1])
+            for leader_action, follower_action in zip(refined_output_list_leader, refined_output_list_follower):
                 if self.leader == "right":
                     combined_action = leader_action + follower_action
                 else:

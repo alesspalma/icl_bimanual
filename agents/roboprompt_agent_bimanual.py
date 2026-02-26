@@ -7,7 +7,7 @@ from PIL import Image
 import os
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT
-from utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
 from openai import OpenAI
 
 def openai_call(client, model_name, messages):
@@ -103,17 +103,8 @@ class RoboPromptAgentBimanual(Agent):
                 match = re.search(regex, output_text)
                 if match:
                     actions = np.array(json.loads(match.group(1)))
-                else: # Try direct JSON parsing
-                    try:
-                        actions = np.array(json.loads(output_text))
-                    except JSONDecodeError:
-                        if "\n" in output_text:
-                            output_text = output_text.replace("\n", ",")
-                        if (not output_text.startswith('[[')) and output_text.endswith(']]'):
-                            output_text = output_text[:-1]  # Remove misaligned trailing ]
-                        elif output_text.startswith('[[') and (not output_text.endswith(']]')):
-                            output_text = output_text[1:]  # Remove misaligned leading [
-                        actions = np.array(json.loads('['+output_text+']')) # handle cases in which just external brackets are missing
+                else:
+                    actions = np.array(json.loads(output_text))
         except Exception as e:
             actions = [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
             print(e)
@@ -122,7 +113,7 @@ class RoboPromptAgentBimanual(Agent):
             actions = [actions]
         output = []
         for action in actions:
-            if len(action) != 7*2: # predicting bimanual action directly for now
+            if len(action) != 7*2:
                 action = [57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1]
             temp_actions = []
             for i in range(2): # because two arms

@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 import json
 import open3d as o3d
-from utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS
+from icl_utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS
 from helpers.demo_loading_utils import keypoint_discovery
 from helpers.utils import visualize_point_cloud_to_file, visualize_point_cloud_live
 
@@ -353,7 +353,7 @@ class base_task_handler:
         path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext", "LeaderFollowerFillIn", "LeaderFollower"]:
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext", "Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong"]:
             examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
@@ -376,7 +376,7 @@ class base_task_handler:
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             
-            if type(agent).__name__ in ["LeaderFollowerFillIn", "LeaderFollower"]:
+            if type(agent).__name__ in ["Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong"]:
                 return right_demonstration + obs + ">", left_demonstration + obs + ">", demonstration + obs + ">"
             return right_demonstration + obs + ">", left_demonstration + obs + ">"
 

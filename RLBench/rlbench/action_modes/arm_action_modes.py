@@ -175,6 +175,16 @@ class BimanualJointPosition(ArmActionMode):
     def __init__(self, absolute_mode: bool = True):
         self._absolute_mode = absolute_mode
 
+    def action(self, scene: Scene, action: np.ndarray, ignore_collisions=None):
+        """Override to accept (and ignore) the ignore_collisions arg passed by
+        BimanualMoveArmThenGripper.  Joint-position control via PD controller
+        inherently cannot teleport through objects, so collision-ignore is N/A.
+        Returns 0 collisions (no path planning = no collision tracking here)."""
+        self.action_pre_step(scene, action)
+        self.action_step(scene)
+        self.action_post_step(scene, action)
+        return 0
+
     def action_pre_step(self, scene: Scene, action: np.ndarray):
         assert_action_shape(action, self.action_shape(scene))
         

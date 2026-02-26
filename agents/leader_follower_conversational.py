@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 import os
 from json import JSONDecodeError
-from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT, SYSTEM_PROMPT_FOLLOWER
+from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
 from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
 from openai import OpenAI
 
@@ -37,7 +37,7 @@ def huggingface_call(model, tokenizer, messages):
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return response
 
-class LeaderFollower(Agent):
+class LeaderFollowerConversational(Agent):
     def __init__(self, task_name, model_config):
         self.episode_id = -1
         self.device = 'cuda'
@@ -81,6 +81,7 @@ class LeaderFollower(Agent):
         if len(self.actions) == 0:
             user_prompt_right, user_prompt_left, user_prompt_bi = self.handler.get_user_prompt(mask_dict, mask_id_to_sim_name, point_cloud_dict, self)
             system_prompt_leader = SYSTEM_PROMPT_RIGHT if self.leader == "right" else SYSTEM_PROMPT_LEFT
+            system_prompt_follower = SYSTEM_PROMPT_LEFT if self.leader == "right" else SYSTEM_PROMPT_RIGHT
             user_prompt_leader = user_prompt_right if self.leader == "right" else user_prompt_left
 
             print(system_prompt_leader)
@@ -118,17 +119,73 @@ class LeaderFollower(Agent):
             objects_dict[f'{self.leader}_arm'] = output_list_leader
             user_prompt_follower += str(objects_dict) + ">"
 
-            print(SYSTEM_PROMPT_FOLLOWER)
+            print(system_prompt_follower)
             print()
             print(user_prompt_follower)
             
-            messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT_FOLLOWER},
+            messages_follower = [
+                    {"role": "system", "content": system_prompt_follower},
                     {"role": "user", "content": user_prompt_follower}
                 ]
-            output_text_follower = self.llm_call(messages)
+            output_text_follower = self.llm_call(messages_follower)
             print(f"Prediction:", output_text_follower)
             output_list_follower = self._postprocess_single_arm(output_text_follower)
+
+            # Phase 3: Leader refinement based on follower's prediction
+            leader_arm_name = "right arm" if self.leader == "right" else "left arm"
+            follower_arm_name = "left arm" if self.leader == "right" else "right arm"
+            
+            # Extract objects dictionary (without arm actions) for Phase 3
+            objects_dict.pop(f'{self.leader}_arm', None)
+            
+            refinement_prompt_leader = (
+                f"The {follower_arm_name} has planned the following actions:\n"
+                f"{follower_arm_name.upper().replace(' ', '_')}_PLAN: {json.dumps(output_list_follower)}\n\n"
+                f"Your previous {leader_arm_name} plan was:\n"
+                f"PREVIOUS_{leader_arm_name.upper().replace(' ', '_')}_PLAN: {json.dumps(output_list_leader)}\n\n"
+                f"CRITICAL INSTRUCTIONS:\n"
+                f"1. You are the {leader_arm_name}. Do NOT copy the {follower_arm_name.upper().replace(' ', '_')}_PLAN.\n"
+                f"2. Refine your PREVIOUS_{leader_arm_name.upper().replace(' ', '_')}_PLAN to coordinate with the {follower_arm_name.upper().replace(' ', '_')}_PLAN above.\n"
+                f"3. If no changes are needed, simply repeat your PREVIOUS_{leader_arm_name.upper().replace(' ', '_')}_PLAN.\n"
+                f"{str(objects_dict)}>"
+            )
+            
+            print()
+            print(refinement_prompt_leader)
+            messages.append({"role": "assistant", "content": output_text_leader})
+            messages.append({"role": "user", "content": refinement_prompt_leader})
+            
+            output_text_leader_refined = self.llm_call(messages)
+            print(f"Refined Leader Prediction:", output_text_leader_refined)
+            output_list_leader_refined = self._postprocess_single_arm(output_text_leader_refined)
+
+            # Phase 4: Follower refinement based on refined leader's prediction
+            # Include refined leader actions in the dictionary for Phase 4
+            objects_dict[f'{self.leader}_arm'] = output_list_leader_refined
+            
+            refinement_prompt_follower = (
+                f"The {leader_arm_name} has updated its plan.\n"
+                f"Your previous {follower_arm_name} plan was:\n"
+                f"PREVIOUS_{follower_arm_name.upper().replace(' ', '_')}_PLAN: {json.dumps(output_list_follower)}\n\n"
+                f"CRITICAL INSTRUCTIONS:\n"
+                f"1. You are the {follower_arm_name}. Do NOT copy the {leader_arm_name.replace(' ', '_')} actions.\n"
+                f"2. Refine your PREVIOUS_{follower_arm_name.upper().replace(' ', '_')}_PLAN to coordinate with the new {leader_arm_name.replace(' ', '_')} actions below.\n"
+                f"3. If no changes are needed, simply repeat your PREVIOUS_{follower_arm_name.upper().replace(' ', '_')}_PLAN.\n"
+                f"{str(objects_dict)}>"
+            )
+            
+            print()
+            print(refinement_prompt_follower)
+            messages_follower.append({"role": "assistant", "content": output_text_follower})
+            messages_follower.append({"role": "user", "content": refinement_prompt_follower})
+            
+            output_text_follower_refined = self.llm_call(messages_follower)
+            print(f"Refined Follower Prediction:", output_text_follower_refined)
+            output_list_follower_refined = self._postprocess_single_arm(output_text_follower_refined)
+
+            # Use refined predictions instead of initial ones
+            output_list_leader = output_list_leader_refined
+            output_list_follower = output_list_follower_refined
 
             # now combine leader and follower discrete actions
             combined_actions = []

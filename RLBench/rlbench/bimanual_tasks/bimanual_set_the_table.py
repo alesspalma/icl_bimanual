@@ -6,7 +6,7 @@ from rlbench.backend.conditions import DetectedCondition, NothingGrasped
 from rlbench.backend.task import BimanualTask
 from collections import defaultdict
 
-class BimanualSetTheTable(Task):
+class BimanualSetTheTable(BimanualTask):
 
     def init_task(self) -> None:
         plate = Shape('plate')
@@ -31,7 +31,7 @@ class BimanualSetTheTable(Task):
             self.waypoint_mapping[f'waypoint{i}'] = 'right'
 
     def init_episode(self, index: int) -> List[str]:
-        return ['set the table'
+        return ['set the table',
                 'place the dishes and cutlery on the table in preparation for '
                 'a meal',
                 'pick up the plate and put it down on the table, then place '

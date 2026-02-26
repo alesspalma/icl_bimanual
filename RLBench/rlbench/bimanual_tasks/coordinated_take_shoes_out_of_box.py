@@ -37,8 +37,8 @@ class CoordinatedTakeShoesOutOfBox(BimanualTask):
     def variation_count(self) -> int:
         return 1
     
-    def is_static_workspace(self):
-        return True
+    # def is_static_workspace(self):
+    #     return True
     
     def base_rotation_bounds(self) -> Tuple[List[float], List[float]]:
         return [0, 0, -np.pi / 8], [0, 0, np.pi / 8]

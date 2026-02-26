@@ -7,7 +7,7 @@ from PIL import Image
 import os
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT, SYSTEM_PROMPT_FOLLOWER_FILLIN
-from utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
 from openai import OpenAI
 
 def openai_call(client, model_name, messages):

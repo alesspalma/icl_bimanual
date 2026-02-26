@@ -9,3 +9,6 @@ logs/
 /*.txt
 debug.py
 docker/
+dino-vit-features/
+ricl_openpi/
+latex/

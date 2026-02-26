@@ -11,7 +11,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from rlbench import CameraConfig, ObservationConfig
 from rlbench.action_modes.action_mode import BimanualMoveArmThenGripper
-from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlanning
+from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlanning, BimanualJointPosition
 from rlbench.action_modes.gripper_action_modes import BimanualDiscrete
 from rlbench.backend import task as rlbench_task
 from rlbench.backend.utils import task_file_to_task_class
@@ -22,11 +22,19 @@ from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
 from agents.oneperarm_dummycontext import OnePerArmDummyContext
 from agents.leader_follower_fillin import LeaderFollowerFillIn
 from agents.leader_follower import LeaderFollower
+from agents.validator import Validator
+from agents.bestofn import BestOfN
+from agents.ping_pong import PingPong
+from agents.leader_follower_conversational import LeaderFollowerConversational
+from agents.kat_agent_bimanual import KATAgentBimanual
+from agents.kat_agent_oneperarm import KATAgentOnePerArm
+from agents.vlm_leader_follower import VLMLeaderFollower
+from agents.ricl_agent import RICLAgent
 from yarr.runners.independent_env_runner import IndependentEnvRunner
 from yarr.utils.stat_accumulator import SimpleAccumulator
 from yarr.utils.rollout_generator import RolloutGenerator
 
-from utils import CAMERAS, SCENE_BOUNDS, ROTATION_RESOLUTION, VOXEL_SIZE, IMAGE_SIZE
+from icl_utils import CAMERAS, SCENE_BOUNDS, ROTATION_RESOLUTION, VOXEL_SIZE, IMAGE_SIZE
 
 import torch
 from torch.multiprocessing import Manager
@@ -38,6 +46,14 @@ agent_classes = {
     "OnePerArmDummyContext": OnePerArmDummyContext,
     "LeaderFollowerFillIn": LeaderFollowerFillIn,
     "LeaderFollower": LeaderFollower,
+    "Validator": Validator,
+    "BestOfN": BestOfN,
+    "LeaderFollowerConversational": LeaderFollowerConversational,
+    "PingPong": PingPong,
+    "KATAgentBimanual": KATAgentBimanual,
+    "KATAgentOnePerArm": KATAgentOnePerArm,
+    "VLMLeaderFollower": VLMLeaderFollower,
+    "RICLAgent": RICLAgent,
 }
 
 def set_all_seeds(seed):
@@ -175,7 +191,13 @@ def main(eval_cfg: DictConfig) -> None:
         # Every environment takes an ActionMode and ObservationConfig which will help determine the
         # inputs actions and the observations the environment will make.
         gripper_mode = BimanualDiscrete()
-        arm_action_mode = BimanualEndEffectorPoseViaPlanning()
+        # RICLAgent predicts joint velocities that we integrate into absolute joint positions.
+        # Use BimanualJointPosition so the PD controller handles execution — this prevents the
+        # explosive object interactions caused by motion-planner path sweeps through geometry.
+        if eval_cfg.method.name == "RICLAgent":
+            arm_action_mode = BimanualJointPosition(absolute_mode=True)
+        else:
+            arm_action_mode = BimanualEndEffectorPoseViaPlanning()
         action_mode = BimanualMoveArmThenGripper(arm_action_mode, gripper_mode)
 
         task_files = [t.replace('.py', '') for t in os.listdir(rlbench_task.BIMANUAL_TASKS_PATH)

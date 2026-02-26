@@ -37,13 +37,37 @@ def huggingface_call(model, tokenizer, messages):
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return response
 
-class LeaderFollower(Agent):
+class Validator(Agent):
     def __init__(self, task_name, model_config):
         self.episode_id = -1
         self.device = 'cuda'
         self.task_name = task_name
         self.model_config = model_config
         self.leader = model_config.leader
+        # self.validator_system_prompt = (
+        #     "You are a supervisor for a bimanual Franka Panda robot. "
+        #     "We will provide you with valid 'Reference Demos'. Each demo shows an observation followed by "
+        #     "a correct sequence of 14-dimensional actions (Right_Arm_7D + Left_Arm_7D). "
+        #     "Your task is to look at a 'Proposed Plan' and determine if it matches the numerical patterns, "
+        #     "trajectory smoothness, and coordination style of the Reference Demos. "
+        #     "Analyze the Proposed Plan for: "
+        #     "1. Data Range: Do the voxel coordinates look consistent with the objects? "
+        #     "2. Synchronization: Do both arms move in a way similar to the demos? "
+        #     "Output format: {'reasoning': 'short sentence', 'verdict': 'PASS' or 'FAIL'}. "
+        #     "Do not output anything else."
+        # )
+        self.validator_system_prompt = (
+            "You are a supervisor for a bimanual Franka Panda robot with parallel grippers. "
+            "We will provide you with valid 'Reference Demos', each demo is in the format observation>[action_1, action_2, ...]. "
+            "Your task is to look at a 'Proposed Plan' and determine if the actions match the numerical patterns, "
+            "trajectory smoothness, and coordination style of the Reference Demos. "
+            "Analyze the Proposed Plan for: "
+            "1. Action patterns: do the action values match the distribution in the demos? "
+            "2. Sequence flow: is the trajectory smooth and of similar length to the demos? "
+            "3. Object interaction: do the actions effectively approach the object positions in the observation, as in the demos? "
+            "Output format: {'reasoning': 'short sentence', 'verdict': 'PASS' or 'FAIL'}. "
+            "Do not output anything else."
+        )
 
     def _preprocess(self, obs, step, **kwargs):
         rgb_dict = {}
@@ -78,77 +102,77 @@ class LeaderFollower(Agent):
 
             point_cloud = obs[f'{camera}_point_cloud'].cpu().squeeze().permute(1, 2, 0).numpy()
             point_cloud_dict[camera] = point_cloud
-        if len(self.actions) == 0:
-            user_prompt_right, user_prompt_left, user_prompt_bi = self.handler.get_user_prompt(mask_dict, mask_id_to_sim_name, point_cloud_dict, self)
-            system_prompt_leader = SYSTEM_PROMPT_RIGHT if self.leader == "right" else SYSTEM_PROMPT_LEFT
-            user_prompt_leader = user_prompt_right if self.leader == "right" else user_prompt_left
+        
+        user_prompt_right, user_prompt_left, user_prompt_bi = self.handler.get_user_prompt(mask_dict, mask_id_to_sim_name, point_cloud_dict, self)
+        system_prompt_leader = SYSTEM_PROMPT_RIGHT if self.leader == "right" else SYSTEM_PROMPT_LEFT
+        user_prompt_leader = user_prompt_right if self.leader == "right" else user_prompt_left
 
-            print(system_prompt_leader)
-            print()
-            print(user_prompt_leader)
+        print(system_prompt_leader)
+        print()
+        print(user_prompt_leader)
 
-            messages = [
-                    {"role": "system", "content": system_prompt_leader},
-                    {"role": "user", "content": user_prompt_leader}
-                ]
-            output_text_leader = self.llm_call(messages)
-            print(f"Prediction:", output_text_leader)
-            output_list_leader = self._postprocess_single_arm(output_text_leader)
+        messages = [
+                {"role": "system", "content": system_prompt_leader},
+                {"role": "user", "content": user_prompt_leader}
+            ]
+        output_text_leader = self.llm_call(messages)
+        print(f"Prediction:", output_text_leader)
+        output_list_leader = self._postprocess_single_arm(output_text_leader)
 
-            # now prepare the follower prompt
-            examples = user_prompt_bi.split(", {") # split over ICL episodes
-            user_prompt_follower = ""
-            for i, example in enumerate(examples[:-1]):
-                if i > 0:
-                    example = "{"+example
-                objects_dict, actions_list = example.split(">")
-                objects_dict = ast.literal_eval(objects_dict)
-                actions_list = json.loads(actions_list)
-                right_actions = []
-                left_actions = []
-                for action in actions_list:
-                    right_actions.append(action[:7])
-                    left_actions.append(action[7:])
-                objects_dict[f'{self.leader}_arm'] = right_actions if self.leader == "right" else left_actions
-                user_prompt_follower += str(objects_dict) + ">" + str(left_actions if self.leader == "right" else right_actions) + ", "
-            # add last live obs with the leader prediction
-            example = "{"+examples[-1]
-            objects_dict, _ = example.split(">")
+        # now prepare the follower prompt
+        examples = user_prompt_bi.split(", {") # split over ICL episodes
+        user_prompt_follower = ""
+        for i, example in enumerate(examples[:-1]):
+            if i > 0:
+                example = "{"+example
+            objects_dict, actions_list = example.split(">")
             objects_dict = ast.literal_eval(objects_dict)
-            objects_dict[f'{self.leader}_arm'] = output_list_leader
-            user_prompt_follower += str(objects_dict) + ">"
+            actions_list = json.loads(actions_list)
+            right_actions = []
+            left_actions = []
+            for action in actions_list:
+                right_actions.append(action[:7])
+                left_actions.append(action[7:])
+            objects_dict[f'{self.leader}_arm'] = right_actions if self.leader == "right" else left_actions
+            user_prompt_follower += str(objects_dict) + ">" + str(left_actions if self.leader == "right" else right_actions) + ", "
+        # add last live obs with the leader prediction
+        example = "{"+examples[-1]
+        objects_dict, _ = example.split(">")
+        objects_dict = ast.literal_eval(objects_dict)
+        objects_dict[f'{self.leader}_arm'] = output_list_leader
+        user_prompt_follower += str(objects_dict) + ">"
 
-            print(SYSTEM_PROMPT_FOLLOWER)
-            print()
-            print(user_prompt_follower)
-            
-            messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT_FOLLOWER},
-                    {"role": "user", "content": user_prompt_follower}
-                ]
-            output_text_follower = self.llm_call(messages)
-            print(f"Prediction:", output_text_follower)
-            output_list_follower = self._postprocess_single_arm(output_text_follower)
+        print(SYSTEM_PROMPT_FOLLOWER)
+        print()
+        print(user_prompt_follower)
+        
+        messages = [
+                {"role": "system", "content": SYSTEM_PROMPT_FOLLOWER},
+                {"role": "user", "content": user_prompt_follower}
+            ]
+        output_text_follower = self.llm_call(messages)
+        print(f"Prediction:", output_text_follower)
+        output_list_follower = self._postprocess_single_arm(output_text_follower)
 
-            # now combine leader and follower discrete actions
-            combined_actions = []
-            # first match length of the leader and follower outputs -> make the shorter equal to the longer by repeating last action
-            len_leader = len(output_list_leader)
-            len_follower = len(output_list_follower)
-            if len_leader > len_follower:
-                for _ in range(len_leader - len_follower):
-                    output_list_follower.append(output_list_follower[-1])
-            elif len_follower > len_leader:
-                for _ in range(len_follower - len_leader):
-                    output_list_leader.append(output_list_leader[-1])
-            for leader_action, follower_action in zip(output_list_leader, output_list_follower):
-                if self.leader == "right":
-                    combined_action = leader_action + follower_action
-                else:
-                    combined_action = follower_action + leader_action
-                combined_actions.append(combined_action)
-            
-            return json.dumps(combined_actions)
+        # now combine leader and follower discrete actions
+        combined_actions = []
+        # first match length of the leader and follower outputs -> make the shorter equal to the longer by repeating last action
+        len_leader = len(output_list_leader)
+        len_follower = len(output_list_follower)
+        if len_leader > len_follower:
+            for _ in range(len_leader - len_follower):
+                output_list_follower.append(output_list_follower[-1])
+        elif len_follower > len_leader:
+            for _ in range(len_follower - len_leader):
+                output_list_leader.append(output_list_leader[-1])
+        for leader_action, follower_action in zip(output_list_leader, output_list_follower):
+            if self.leader == "right":
+                combined_action = leader_action + follower_action
+            else:
+                combined_action = follower_action + leader_action
+            combined_actions.append(combined_action)
+        
+        return json.dumps(combined_actions), user_prompt_bi
 
     def _postprocess_single_arm(self, output_text):
         try:
@@ -244,14 +268,67 @@ class LeaderFollower(Agent):
 
         # get subsequent predicted actions
         return output[:26]
+    
+    def _validate_prediction(self, prediction, user_prompt_bi):
         
+        examples = user_prompt_bi.split(", {") # split over ICL episodes
+        last_observation = "{"+examples[-1]
+        icl_examples = ""
+        for i, example in enumerate(examples[:-1]):
+            if i > 0:
+                example = "{"+example
+            icl_examples += example + "\n"
+        
+        # Format the proposal to look like a demo
+        proposal_str = f"Proposed Plan:\n{last_observation}{prediction}"
+        
+        prompt_content = (
+            f"Reference Demos:\n{icl_examples}\n"
+            f"{proposal_str}\n"
+            "Question: Does the Proposed Plan match the trends in the Reference Demos?"
+        )
+
+        print(self.validator_system_prompt)
+        print()
+        print(prompt_content)
+        response = self.llm_call(
+            [
+                {"role": "system", "content": self.validator_system_prompt},
+                {"role": "user", "content": prompt_content}
+            ]
+        )
+        print("Validator Response:", response)
+
+        content = response.strip()
+        # Simple parsing for JSON output
+        try:
+            # Attempt to find JSON-like structure
+            start = content.find('{')
+            end = content.rfind('}') + 1
+            if start != -1 and end != -1:
+                dictionary = content[start:end]
+                data = ast.literal_eval(dictionary)
+                return data.get("verdict", "FAIL"), data.get("reasoning", "")
+            else:
+                # Fallback parsing if LLM forgot JSON
+                if "PASS" in content: return "PASS", "heuristic"
+                return "FAIL", "heuristic"
+        except Exception as e:
+            return "FAIL", f"error {e}"
+
     def act(self, step: int, observation: dict,
             deterministic=False, **kwargs) -> ActResult:
-        # inference
-        output_text = self._preprocess(observation, step, **kwargs)
+        # LF inference
         if len(self.actions) == 0:
-            output = self._postprocess_dual_arm(output_text) # extract continuous actions from the LLM prediction
-            self.actions = output
+            iteration = 0
+            while iteration < 5:
+                output_text, user_prompt_bi = self._preprocess(observation, step, **kwargs)
+                validation, motivation = self._validate_prediction(output_text, user_prompt_bi)
+                if validation == "PASS" or iteration == 4:
+                    output = self._postprocess_dual_arm(output_text) # extract continuous actions from the LLM prediction
+                    self.actions = output
+                    break
+                iteration += 1
             
         continuous_action = self.actions.pop(0)      
 
