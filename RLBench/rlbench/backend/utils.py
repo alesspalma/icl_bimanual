@@ -317,11 +317,6 @@ SIM_NAME_TO_REAL_NAME = {
         "handover": "handover"
     },
     "bimanual_take_item_out_of_box": {
-<<<<<<< HEAD
         "box_lid": "box",
     }
-=======
-        "box_lid": "box"
-    },
->>>>>>> wip/before-sync
 }

@@ -248,7 +248,7 @@ class RoboPromptAgentOnePerArm(LLMTrackingMixin, Agent):
         elif self.model_config.llm_call_style == "vllm":
             print("using remote vllm-served model")
             client = OpenAI(
-                base_url=f"http://127.0.0.1:8080/v1",
+                base_url=f"http://127.0.0.1:8000/v1",
                 api_key="password",
             )
             model_name = "/leonardo_scratch/large/userexternal/apalma01/llm_models/" + self.model_config.name.split("/")[-1]

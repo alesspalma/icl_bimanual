@@ -66,7 +66,7 @@ CHECKPOINT_DIR="pi0_fast_droid_ricl_checkpoint"
 DEMOS_ROOT="${RICL_DIR}/preprocessing/collected_demos"
 
 RIGHT_PORT=8000
-LEFT_PORT=8002
+LEFT_PORT=8001
 RICL_HOST="127.0.0.1"
 
 # Agent settings
@@ -93,7 +93,7 @@ REPEAT_EVAL=1
 
 # All bimanual tasks
 ALL_TASKS=(
-    # "bimanual_dual_push_buttons"
+    "bimanual_dual_push_buttons"
     "bimanual_handover_item"
     "bimanual_handover_item_easy"
     "bimanual_lift_ball"
