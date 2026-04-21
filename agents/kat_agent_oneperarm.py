@@ -58,11 +58,11 @@ class KATAgentOnePerArm(Agent):
             rgb_img = np.clip(((rgb_img + 1.0) / 2 * 255).astype(np.uint8), 0, 255)
             rgb_dict[camera] = rgb_img
 
-            # Save RGB for debugging
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
-            os.makedirs(rgb_dir, exist_ok=True)
-            img.save(os.path.join(rgb_dir, f'{self.step}.png'))
+            # # Save RGB for debugging
+            # img = Image.fromarray(rgb_img)
+            # rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
+            # os.makedirs(rgb_dir, exist_ok=True)
+            # img.save(os.path.join(rgb_dir, f'{self.step}.png'))
 
             # Point cloud (H, W, 3) in world frame
             point_cloud = obs[f'{camera}_point_cloud'].cpu().squeeze().permute(1, 2, 0).numpy()

@@ -165,17 +165,17 @@ class VLMLeaderFollower(Agent):
 
     # ── main inference logic ──────────────────────────────────────────
     def _preprocess(self, obs, step, **kwargs):
-        # Save RGB for every step (logging / debugging)
-        for camera in CAMERAS:
-            rgb_img = obs[f"{camera}_rgb"]
-            rgb_img = rgb_img.squeeze().permute(1, 2, 0).cpu().numpy()
-            rgb_img = np.clip(((rgb_img + 1.0) / 2 * 255).astype(np.uint8), 0, 255)
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(
-                self.savedir, "rgb_dir", camera, str(self.episode_id)
-            )
-            os.makedirs(rgb_dir, exist_ok=True)
-            img.save(os.path.join(rgb_dir, f"{self.step}.png"))
+        # # Save RGB for every step (logging / debugging)
+        # for camera in CAMERAS:
+        #     rgb_img = obs[f"{camera}_rgb"]
+        #     rgb_img = rgb_img.squeeze().permute(1, 2, 0).cpu().numpy()
+        #     rgb_img = np.clip(((rgb_img + 1.0) / 2 * 255).astype(np.uint8), 0, 255)
+        #     img = Image.fromarray(rgb_img)
+        #     rgb_dir = os.path.join(
+        #         self.savedir, "rgb_dir", camera, str(self.episode_id)
+        #     )
+        #     os.makedirs(rgb_dir, exist_ok=True)
+        #     img.save(os.path.join(rgb_dir, f"{self.step}.png"))
 
         if len(self.actions) == 0:
             # ── 1. Build query image from live observation ────────────

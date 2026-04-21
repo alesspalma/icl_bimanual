@@ -1,0 +1,8 @@
+1773612759.415281 client started (3446332): version 3.4, socket /tmp/tmux-1000019/default, protocol 8
+1773612759.415307 on Linux 6.17.0-14-generic #14~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Jan 15 15:52:10 UTC 2
+1773612759.415310 using libevent 2.1.12-stable poll
+1773612759.415311 using ncurses 6.4 20240113
+1773612759.415318 flags are 0x10000
+1773612759.415325 socket is /tmp/tmux-1000019/default
+1773612759.415332 trying connect
+1773612759.415343 connect failed: Connection refused

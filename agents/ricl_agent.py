@@ -139,6 +139,8 @@ class RICLAgent(Agent):
         # PyRep arm handles — no longer needed (using joint positions directly)
         self._right_arm = None
         self._left_arm = None
+        self.right_client = None
+        self.left_client = None
 
     # ── Observation → RICL request ────────────────────────────────────
 
@@ -234,15 +236,15 @@ class RICLAgent(Agent):
     # ── Main inference ────────────────────────────────────────────────
 
     def _preprocess(self, obs, step, **kwargs):
-        # Save RGBs for logging
-        for camera in CAMERAS:
-            rgb_img = _extract_rgb(obs, camera)
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(
-                self.savedir, "rgb_dir", camera, str(self.episode_id)
-            )
-            os.makedirs(rgb_dir, exist_ok=True)
-            img.save(os.path.join(rgb_dir, f"{self.step}.png"))
+        # # Save RGBs for logging
+        # for camera in CAMERAS:
+        #     rgb_img = _extract_rgb(obs, camera)
+        #     img = Image.fromarray(rgb_img)
+        #     rgb_dir = os.path.join(
+        #         self.savedir, "rgb_dir", camera, str(self.episode_id)
+        #     )
+        #     os.makedirs(rgb_dir, exist_ok=True)
+        #     img.save(os.path.join(rgb_dir, f"{self.step}.png"))
 
         if len(self.actions) != 0:
             return  # still executing cached actions
@@ -310,6 +312,7 @@ class RICLAgent(Agent):
     def load_weights(self, savedir: str):
         _ensure_openpi_client()
         self.savedir = savedir
+        self.close()
 
         print(f"[RICL] Connecting to right-arm server at "
               f"{self.ricl_host}:{self.ricl_right_port}")
@@ -324,6 +327,16 @@ class RICLAgent(Agent):
         )
 
         print("[RICL] Connected to both servers.")
+
+    def close(self):
+        for attr in ("right_client", "left_client"):
+            client = getattr(self, attr, None)
+            if client is None:
+                continue
+            try:
+                client.close()
+            finally:
+                setattr(self, attr, None)
 
     def build(self, training: bool, device=None):
         return

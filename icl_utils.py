@@ -30,6 +30,14 @@ def quaternion_to_discrete_euler(quaternion):
     disc[disc == int(360 / ROTATION_RESOLUTION)] = 0
     return disc
 
+def rotation_matrix_to_discrete_euler(R):
+    R = np.array(R).copy()  # ensure writable (Open3D OBB R can be read-only)
+    euler = Rotation.from_matrix(R).as_euler('xyz', degrees=True) + 180
+    euler = np.clip(euler, 0, 360)
+    disc = np.around((euler / ROTATION_RESOLUTION)).astype(int)
+    disc[disc == int(360 / ROTATION_RESOLUTION)] = 0
+    return disc
+
 def normalize_quaternion(quat):
     return np.array(quat) / np.linalg.norm(quat, axis=-1, keepdims=True)
 

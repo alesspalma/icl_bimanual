@@ -456,6 +456,9 @@ class UnimanualEndEffectorPoseViaPlanning(EndEffectorPoseViaPlanning):
 
 class BimanualEndEffectorPoseViaPlanning(EndEffectorPoseViaPlanning):
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.collision_from_prev_action = 0
 
     def action(self, scene: Scene, action: np.ndarray, ignore_collisions):
         

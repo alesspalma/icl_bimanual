@@ -22,6 +22,7 @@ from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
 from agents.oneperarm_dummycontext import OnePerArmDummyContext
 from agents.leader_follower_fillin import LeaderFollowerFillIn
 from agents.leader_follower import LeaderFollower
+from agents.ping_pong_bestofn import PingPongBestOfN
 from agents.validator import Validator
 from agents.bestofn import BestOfN
 from agents.ping_pong import PingPong
@@ -50,11 +51,13 @@ agent_classes = {
     "BestOfN": BestOfN,
     "LeaderFollowerConversational": LeaderFollowerConversational,
     "PingPong": PingPong,
+    "PingPongBestOfN": PingPongBestOfN,
     "KATAgentBimanual": KATAgentBimanual,
     "KATAgentOnePerArm": KATAgentOnePerArm,
     "VLMLeaderFollower": VLMLeaderFollower,
     "RICLAgent": RICLAgent,
 }
+
 
 def set_all_seeds(seed):
     # fix all seeds for reproducibility
@@ -151,21 +154,27 @@ def eval_seed(eval_cfg,
     manager = Manager()
     save_load_lock = manager.Lock()
     writer_lock = manager.Lock()
-    
-    result, avg_collisions = env_runner.start({"task": 0}, save_load_lock, writer_lock,
-                              env_config, 0,
-                              eval_cfg.framework.eval_save_metrics,
-                              eval_cfg.cinematic_recorder)
 
-    # Delete objects in the reverse order they were created
-    del save_load_lock, writer_lock, manager  # Delete multiprocessing objects
-    del env_runner  # Delete the runner which contains references to other objects
-    del stat_accum, rg  # Delete supporting objects
-    del agent  # Delete the agent last after everything that referenced it
-    gc.collect()
-    torch.cuda.empty_cache()
+    try:
+        result, avg_collisions = env_runner.start({"task": 0}, save_load_lock, writer_lock,
+                                  env_config, 0,
+                                  eval_cfg.framework.eval_save_metrics,
+                                  eval_cfg.cinematic_recorder)
+        return result, avg_collisions
+    finally:
+        close_fn = getattr(agent, "close", None)
+        if callable(close_fn):
+            close_fn()
+        if hasattr(manager, "shutdown"):
+            manager.shutdown()
 
-    return result, avg_collisions
+        # Delete objects in the reverse order they were created
+        del save_load_lock, writer_lock, manager  # Delete multiprocessing objects
+        del env_runner  # Delete the runner which contains references to other objects
+        del stat_accum, rg  # Delete supporting objects
+        del agent  # Delete the agent last after everything that referenced it
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 @hydra.main(config_name='config', config_path='.')

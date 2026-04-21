@@ -2,7 +2,7 @@ CoppeliaSim_Edu_V4_1_0_Ubuntu20_04/
 outputs/
 run.sh
 .vscode/
-generated_data*/
+generated_data*
 __pycache__/
 redirections/
 logs/
@@ -12,3 +12,4 @@ docker/
 dino-vit-features/
 ricl_openpi/
 latex/
+3d_flowmatch_actor/

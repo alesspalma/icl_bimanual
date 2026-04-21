@@ -39,7 +39,7 @@ from helpers.demo_loading_utils import keypoint_discovery
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dino-vit-features'))
 import keypoint_utils
 
-ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train"  # TODO: change this
+ROOT = "/media/nvme/palma/icl_bimanual/generated_data/train"  # TODO: change this
 
 # KAT-style system prompts — observations are keypoint coordinates, not named objects
 SYSTEM_PROMPT = (

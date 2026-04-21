@@ -55,11 +55,10 @@ class RoboPromptAgentOnePerArm(Agent):
 
             rgb_dict[camera] = rgb_img
 
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
-            os.makedirs(rgb_dir, exist_ok=True)
-            # Save the image as PNG
-            img.save(os.path.join(rgb_dir, f'{self.step}.png'))
+            # img = Image.fromarray(rgb_img)
+            # rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
+            # os.makedirs(rgb_dir, exist_ok=True)
+            # img.save(os.path.join(rgb_dir, f'{self.step}.png'))
 
             mask_id_to_sim_name.update(kwargs["mapping_dict"][f"{camera}_mask_id_to_name"])
 
@@ -68,11 +67,10 @@ class RoboPromptAgentOnePerArm(Agent):
 
             mask_dict[camera] = mask
 
-            mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
-
-            os.makedirs(mask_dir, exist_ok=True)
-            mask_pil = Image.fromarray(mask.astype(np.uint8))
-            mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))
+            # mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
+            # os.makedirs(mask_dir, exist_ok=True)
+            # mask_pil = Image.fromarray(mask.astype(np.uint8))
+            # mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))
 
             point_cloud = obs[f'{camera}_point_cloud'].cpu().squeeze().permute(1, 2, 0).numpy()
             point_cloud_dict[camera] = point_cloud
@@ -213,7 +211,7 @@ class RoboPromptAgentOnePerArm(Agent):
         elif self.model_config.llm_call_style == "vllm":
             print("using remote vllm-served model")
             client = OpenAI(
-                base_url=f"http://127.0.0.1:8000/v1",
+                base_url=f"http://127.0.0.1:8080/v1",
                 api_key="password",
             )
             model_name = "/leonardo_scratch/large/userexternal/apalma01/llm_models/" + self.model_config.name.split("/")[-1]

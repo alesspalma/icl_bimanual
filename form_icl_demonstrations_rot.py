@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 import json
 import open3d as o3d
-from icl_utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS
+from icl_utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, rotation_matrix_to_discrete_euler, CAMERAS
 from helpers.demo_loading_utils import keypoint_discovery
 from helpers.utils import visualize_point_cloud_to_file, visualize_point_cloud_live
 
@@ -110,8 +110,11 @@ def _add_keypoints_to_replay(
     if len(sim_name_to_real_name) != len(mask_id_to_real_name):
         print(f"WARNING objects not found: {set(sim_name_to_real_name.values()) - set(mask_id_to_real_name.values())}")
 
+    # Compute orientations from point clouds (used by all methods, and as fallback for GT)
+    orientations_dict = _compute_orientations_from_pointcloud(mask_dict, mask_id_to_real_name, point_cloud_dict)
+
     if use_gt_pos:
-        avg_coord = form_obs_gt(demo, cur_index, sim_name_to_real_name)
+        avg_coord = form_obs_gt(demo, cur_index, sim_name_to_real_name, orientations_dict)
     else:
         # avg_coord = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
         # avg_coord = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
@@ -119,8 +122,8 @@ def _add_keypoints_to_replay(
     # sort avg_coord alphabetically by key
     avg_coord = str({k: eval(avg_coord)[k] for k in sorted(eval(avg_coord))})
     
-    ####### for statistics
-    avg_coord_gt = eval(form_obs_gt(demo, cur_index, sim_name_to_real_name))
+    ####### for statistics (compare positions only, first 3 values)
+    avg_coord_gt = eval(form_obs_gt(demo, cur_index, sim_name_to_real_name, orientations_dict))
     avg_coord_std = eval(form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict))
     avg_coord_concat = eval(form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict))
     avg_coord_prune = eval(form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict))
@@ -129,9 +132,9 @@ def _add_keypoints_to_replay(
     diff_gt_conc = {}
     diff_gt_prune = {}
     for key in avg_coord_gt:
-        diff_gt_std[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_std[key]))
-        diff_gt_conc[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_concat[key]))
-        diff_gt_prune[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_prune[key]))
+        diff_gt_std[key] = np.linalg.norm(np.array(avg_coord_gt[key][:3]) - np.array(avg_coord_std[key][:3]))
+        diff_gt_conc[key] = np.linalg.norm(np.array(avg_coord_gt[key][:3]) - np.array(avg_coord_concat[key][:3]))
+        diff_gt_prune[key] = np.linalg.norm(np.array(avg_coord_gt[key][:3]) - np.array(avg_coord_prune[key][:3]))
     #######
 
     buffer.append(avg_coord) # appends center coordinates of the objects in the scene
@@ -223,21 +226,72 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use
     print("Task", task_name, "\navg diff gt std:", tot_diff_gt_std, "\navg diff gt conc:", tot_diff_gt_conc, "\navg diff gt prune:", tot_diff_gt_prune, "\n")
     return buffer
 
-def form_obs_gt(demo, cur_index, sim_name_to_real_name):
+def _estimate_orientation_from_points(merged_points):
+    """Estimate object orientation from raw 3D points using Open3D Oriented Bounding Box.
+    Returns discretized Euler angles [r1, r2, r3] with values in range 0-71."""
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(merged_points)
+    pc = pc.voxel_down_sample(voxel_size=0.02)
+    return _estimate_orientation_from_pc(pc)
+
+def _estimate_orientation_from_pc(pc):
+    """Estimate object orientation from an Open3D PointCloud using Oriented Bounding Box."""
+    points = np.asarray(pc.points)
+    if len(points) >= 4:
+        try:
+            obb = pc.get_oriented_bounding_box()
+            return list(rotation_matrix_to_discrete_euler(obb.R))
+        except Exception:
+            return [0, 0, 0]
+    return [0, 0, 0]
+
+def _compute_orientations_from_pointcloud(mask_dict, mask_id_to_real_name, point_cloud_dict):
+    """Compute discretized orientation for each object from point clouds across all cameras."""
+    uniques = np.unique(np.concatenate(list(mask_dict.values()), axis=0))
+    real_name_to_orientation = {}
+    for mask_id in uniques:
+        if mask_id not in mask_id_to_real_name:
+            continue
+        all_object_points = []
+        for camera in CAMERAS:
+            mask = mask_dict[camera]
+            point_cloud = point_cloud_dict[camera]
+            if not np.any(mask == mask_id):
+                continue
+            object_points = point_cloud[mask == mask_id].reshape(-1, 3)
+            all_object_points.append(object_points)
+        if all_object_points:
+            merged_points = np.concatenate(all_object_points, axis=0)
+            real_name = mask_id_to_real_name[mask_id]
+            real_name_to_orientation[real_name] = _estimate_orientation_from_points(merged_points)
+    return real_name_to_orientation
+
+def form_obs_gt(demo, cur_index, sim_name_to_real_name, orientations_dict=None):
     real_name_to_avg_coord = {}
     for sim_name, real_name in sim_name_to_real_name.items():
         obj_pos = demo[cur_index].misc['object_positions'][sim_name]
-        real_name_to_avg_coord[real_name] = obj_pos
+        # Use recorded GT orientation if available (future recordings), else use estimated from point clouds
+        if 'object_orientations' in demo[cur_index].misc and sim_name in demo[cur_index].misc['object_orientations']:
+            obj_rot = demo[cur_index].misc['object_orientations'][sim_name]
+        elif orientations_dict is not None and real_name in orientations_dict:
+            obj_rot = orientations_dict[real_name]
+        else:
+            obj_rot = [0, 0, 0]
+        real_name_to_avg_coord[real_name] = obj_pos + obj_rot
     return str(real_name_to_avg_coord)
 
 def form_obs_gt_test(sim_name_to_real_name):
-    # Extract gt object positions from live simulation
+    # Extract gt object positions and orientations from live simulation
     object_positions = {}
     for sim_name in sim_name_to_real_name:
         obj = Object.get_object(sim_name)
         position = obj.get_position()
         voxel = point_to_voxel_index(position)
-        object_positions[sim_name_to_real_name[sim_name]] = list(voxel)
+        quat = normalize_quaternion(obj.get_quaternion())
+        if quat[-1] < 0:
+            quat = -quat
+        disc_rot = quaternion_to_discrete_euler(quat)
+        object_positions[sim_name_to_real_name[sim_name]] = list(voxel) + list(disc_rot)
     return str(object_positions)
 
 def form_obs(
@@ -252,6 +306,7 @@ def form_obs(
         if mask_id not in mask_id_to_real_name: # for each object id I am interested in
             continue
         avg_point_list = []
+        all_object_points = []
         for camera in CAMERAS: # for each camera
             mask = mask_dict[camera] # take the mask from that camera
             point_cloud = point_cloud_dict[camera] # take the point cloud from that camera
@@ -259,10 +314,13 @@ def form_obs(
                 continue
             object_points = point_cloud[mask == mask_id].reshape(-1, 3)
             avg_point_list.append(np.mean(object_points, axis = 0)) # take the average point (center) in the point cloud for that object
+            all_object_points.append(object_points)
 
         avg_point = sum(avg_point_list) / len(avg_point_list) # take average of the centers
+        merged_points = np.concatenate(all_object_points, axis=0)
+        disc_rot = _estimate_orientation_from_points(merged_points)
         real_name = mask_id_to_real_name[mask_id]
-        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point)) + disc_rot
     return str(real_name_to_avg_coord)
 
 def form_obs_concatenate_clouds(
@@ -290,8 +348,9 @@ def form_obs_concatenate_clouds(
         # Merge all points from different cameras and compute center once
         merged_points = np.concatenate(all_object_points, axis=0)
         avg_point = np.mean(merged_points, axis=0)
+        disc_rot = _estimate_orientation_from_points(merged_points)
         real_name = mask_id_to_real_name[mask_id]
-        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point)) + disc_rot
     
     return str(real_name_to_avg_coord)
 
@@ -323,8 +382,9 @@ def form_obs_prune_points(
         pc.points = o3d.utility.Vector3dVector(merged_points)
         pc = pc.voxel_down_sample(voxel_size=0.02)
         avg_point = np.mean(np.asarray(pc.points), axis=0)
+        disc_rot = _estimate_orientation_from_pc(pc)
         real_name = mask_id_to_real_name[mask_id]
-        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point)) + disc_rot
     
     return str(real_name_to_avg_coord)
 
@@ -353,7 +413,7 @@ class base_task_handler:
         path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext", "Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong", "PingPongBestOfN"]:
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext", "Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong"]:
             examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
@@ -376,7 +436,7 @@ class base_task_handler:
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             
-            if type(agent).__name__ in ["Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong", "PingPongBestOfN"]:
+            if type(agent).__name__ in ["Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong"]:
                 return right_demonstration + obs + ">", left_demonstration + obs + ">", demonstration + obs + ">"
             return right_demonstration + obs + ">", left_demonstration + obs + ">"
 
