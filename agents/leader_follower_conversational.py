@@ -89,7 +89,6 @@ class LeaderFollowerConversational(Agent):
             mask_dict[camera] = mask
 
             # mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
-
             # os.makedirs(mask_dir, exist_ok=True)
             # mask_pil = Image.fromarray(mask.astype(np.uint8))
             # mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))

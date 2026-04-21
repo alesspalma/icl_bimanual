@@ -40,7 +40,7 @@ from icl_utils import (
 )
 from helpers.demo_loading_utils import keypoint_discovery
 
-ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train"  # TODO: change this
+ROOT = "/media/nvme/palma/icl_bimanual/generated_data/train"  # TODO: change this
 
 DEPTH_SCALE = 2 ** 24 - 1  # 24-bit depth encoding used by RLBench
 

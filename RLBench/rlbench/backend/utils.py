@@ -234,6 +234,18 @@ def rgb_handles_to_mask(rgb_coded_handles):
 
 SCENE_BOUNDS = np.array([-0.3, -0.5, 0.6, 0.7, 0.5, 1.6])
 VOXEL_SIZE = 100
+ROTATION_RESOLUTION = 5
+
+def normalize_quaternion(quat):
+    return np.array(quat) / np.linalg.norm(quat, axis=-1, keepdims=True)
+
+def quaternion_to_discrete_euler(quaternion):
+    from scipy.spatial.transform import Rotation
+    euler = Rotation.from_quat(quaternion).as_euler('xyz', degrees=True) + 180
+    euler = np.clip(euler, 0, 360)
+    disc = np.around((euler / ROTATION_RESOLUTION)).astype(int)
+    disc[disc == int(360 / ROTATION_RESOLUTION)] = 0
+    return disc
 
 def point_to_voxel_index(
         point: np.ndarray):
@@ -305,6 +317,11 @@ SIM_NAME_TO_REAL_NAME = {
         "handover": "handover"
     },
     "bimanual_take_item_out_of_box": {
+<<<<<<< HEAD
         "box_lid": "box",
     }
+=======
+        "box_lid": "box"
+    },
+>>>>>>> wip/before-sync
 }

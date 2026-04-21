@@ -18,7 +18,7 @@ task_init_rotation["bimanual_straighten_rope"]=280
 task_init_rotation["bimanual_take_tray_out_of_oven"]=-245
 
 for task in "${tasks[@]}"; do
-    init_rot=${task_init_rotation[$task]}
+    init_rot=${task_init_rotation[$task]:-280}
     echo "Recording BiCICLe on task: $task (init_rotation=$init_rot)"
     mkdir -p "${log_dir}/${task}/videos"
 

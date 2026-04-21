@@ -23,7 +23,7 @@ class CameraMotion(object):
 class CircleCameraMotion(CameraMotion):
 
     def __init__(self, cam: VisionSensor, origin: Dummy,
-                 speed: float, init_rotation: float = np.deg2rad(180)):
+                 speed: float, init_rotation: float = np.deg2rad(280)):
         super().__init__(cam)
         self.origin = origin
         self.speed = speed  # in radians
@@ -60,19 +60,19 @@ class TaskRecorder(object):
         for image in self._current_snaps:
             frame = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-            font = cv2.FONT_HERSHEY_DUPLEX
-            font_scale = (0.45 * image_size[0]) / 640
-            font_thickness = 2
+            # font = cv2.FONT_HERSHEY_DUPLEX
+            # font_scale = (0.45 * image_size[0]) / 640
+            # font_thickness = 2
 
 
-            if lang_goal:
+            # if lang_goal:
 
-                lang_textsize = cv2.getTextSize(lang_goal, font, font_scale, font_thickness)[0]
-                lang_textX = (image_size[0] - lang_textsize[0]) // 2
+            #     lang_textsize = cv2.getTextSize(lang_goal, font, font_scale, font_thickness)[0]
+            #     lang_textX = (image_size[0] - lang_textsize[0]) // 2
 
-                frame = cv2.putText(frame, lang_goal, org=(lang_textX, image_size[1] - 35),
-                                    fontScale=font_scale, fontFace=font, color=(0, 0, 0),
-                                    thickness=font_thickness, lineType=cv2.LINE_AA)
+            #     frame = cv2.putText(frame, lang_goal, org=(lang_textX, image_size[1] - 35),
+            #                         fontScale=font_scale, fontFace=font, color=(0, 0, 0),
+            #                         thickness=font_thickness, lineType=cv2.LINE_AA)
                 
 
             video.write(frame)

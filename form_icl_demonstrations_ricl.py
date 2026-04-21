@@ -89,7 +89,7 @@ from openpi_client.image_tools import resize_with_pad
 from openpi.policies.utils import embed_with_batches, load_dinov2, EMBED_DIM
 
 # --------------- paths --------------------------------------------------------
-ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train"
+ROOT = "/media/nvme/palma/icl_bimanual/generated_data/train"
 RICL_DEMOS_ROOT = os.path.join(RICL_REPO, "preprocessing", "collected_demos")
 DATE_PREFIX = datetime.now().strftime("%Y-%m-%d")
 NUM_EPISODES = 100  # number of demos per task (used as RICL retrieval pool)

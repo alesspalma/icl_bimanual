@@ -33,5 +33,6 @@ cinematic_recorder:
     enabled: False
     camera_resolution: [1280, 720]
     fps: 30
+    init_rotation: 280
     rotate_speed: 0.005
     save_path: './videos/'

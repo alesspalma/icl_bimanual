@@ -52,7 +52,7 @@
 set -euo pipefail
 
 # ───────────────────────── Configuration ─────────────────────────
-PROJECT_DIR="/home/alessio/Desktop/icl_bimanual"
+PROJECT_DIR="/media/nvme/palma/icl_bimanual"
 RICL_DIR="${PROJECT_DIR}/ricl_openpi"
 
 # Python environments
@@ -66,7 +66,7 @@ CHECKPOINT_DIR="pi0_fast_droid_ricl_checkpoint"
 DEMOS_ROOT="${RICL_DIR}/preprocessing/collected_demos"
 
 RIGHT_PORT=8000
-LEFT_PORT=8001
+LEFT_PORT=8002
 RICL_HOST="127.0.0.1"
 
 # Agent settings
@@ -93,7 +93,7 @@ REPEAT_EVAL=1
 
 # All bimanual tasks
 ALL_TASKS=(
-    "bimanual_dual_push_buttons"
+    # "bimanual_dual_push_buttons"
     "bimanual_handover_item"
     "bimanual_handover_item_easy"
     "bimanual_lift_ball"
@@ -138,20 +138,20 @@ wait_for_server() {
     # Wait until a RICL server is accepting websocket connections.
     local port="$1"
     local name="$2"
-    local max_wait=300  # 5 minutes max
+    local max_wait=600  # 10 minutes max
     local waited=0
 
     echo "  Waiting for ${name} server on port ${port}..."
     while ! python3 -c "
-import socket, sys
+import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(1)
 try:
-    s.settimeout(1)
     s.connect(('${RICL_HOST}', ${port}))
+except Exception:
+    raise SystemExit(1)
+finally:
     s.close()
-    sys.exit(0)
-except:
-    sys.exit(1)
 " 2>/dev/null; do
         sleep 2
         waited=$((waited + 2))
@@ -244,7 +244,7 @@ for task in "${TASKS[@]}"; do
     # weights; two independent servers would require ~12.5 GB each on 16 GB VRAM).
     echo "  Starting bimanual RICL server (right:${RIGHT_PORT}, left:${LEFT_PORT})..."
     cd "${RICL_DIR}"
-    uv run --no-sync scripts/serve_policy_ricl_bimanual.py \
+    CUDA_VISIBLE_DEVICES=1 TMPDIR=/media/nvme/palma/icl_bimanual/tmp uv run --no-sync scripts/serve_policy_ricl_bimanual.py \
         --right_port "${RIGHT_PORT}" \
         --left_port  "${LEFT_PORT}" \
         --config=pi0_fast_droid_ricl \
@@ -279,29 +279,41 @@ for task in "${TASKS[@]}"; do
     # ── Run evaluation (icl_bimanual conda env) ───────────────
     # main.py uses PyRep/RLBench/YARR which are installed in the conda env.
     # The openpi_client websocket library must also be installed there.
+    # conda run starts a clean subprocess — propagate CoppeliaSim env vars
+    # that PyRep needs to find libcoppeliaSim.so at import time.
+    # Temporarily disable set -e so a failed evaluation doesn't kill the whole pipeline.
+    REDIR_FILE="${PROJECT_DIR}/redirections/ricl/${AGENT}/${task}.txt"
+    set +e
     conda run -n "${CONDA_ENV}" --no-capture-output \
-    xvfb-run -a -s "-screen 0 1280x1024x24" \
+    bash -c "
+    export PYTHONUNBUFFERED=1
+    export COPPELIASIM_ROOT=\"\${HOME}/CoppeliaSim\"
+    export LD_LIBRARY_PATH=\"\${LD_LIBRARY_PATH:-}:\${COPPELIASIM_ROOT}\"
+    export QT_QPA_PLATFORM_PLUGIN_PATH=\"\${COPPELIASIM_ROOT}\"
+    export CUDA_VISIBLE_DEVICES=1
+    xvfb-run -a -s \"-screen 0 1280x1024x24\" \
     python main.py \
-        method.name="${AGENT}" \
-        model.llm_call_style="openai" \
-        model.name="ricl" \
-        model.ricl_host="${RICL_HOST}" \
-        model.ricl_right_port="${RIGHT_PORT}" \
-        model.ricl_left_port="${LEFT_PORT}" \
-        model.ricl_integration_steps="${INTEGRATION_STEPS}" \
-        model.ricl_integration_dt="${INTEGRATION_DT}" \
-        rlbench.tasks="[${task}]" \
-        rlbench.task_name="${task}" \
-        rlbench.episode_length="${EPISODE_LENGTH}" \
-        rlbench.demo_path="${TEST_DATA_PATH}" \
+        method.name=\"${AGENT}\" \
+        model.llm_call_style=\"openai\" \
+        model.name=\"ricl\" \
+        +model.ricl_host=\"${RICL_HOST}\" \
+        +model.ricl_right_port=\"${RIGHT_PORT}\" \
+        +model.ricl_left_port=\"${LEFT_PORT}\" \
+        +model.ricl_integration_steps=\"${INTEGRATION_STEPS}\" \
+        +model.ricl_integration_dt=\"${INTEGRATION_DT}\" \
+        rlbench.tasks=\"[${task}]\" \
+        rlbench.task_name=\"${task}\" \
+        rlbench.episode_length=\"${EPISODE_LENGTH}\" \
+        rlbench.demo_path=\"${TEST_DATA_PATH}\" \
         framework.gpu=0 \
-        framework.logdir="${LOG_DIR}" \
-        framework.eval_episodes="${EVAL_EPISODES}" \
+        framework.logdir=\"${LOG_DIR}\" \
+        framework.eval_episodes=\"${EVAL_EPISODES}\" \
         rlbench.headless=True \
-        framework.repeat_eval="${REPEAT_EVAL}" \
-        > "redirections/ricl/${AGENT}/${task}.txt" 2>&1
-
+        framework.repeat_eval=\"${REPEAT_EVAL}\" \
+    > \"${REDIR_FILE}\" 2>&1
+    "
     eval_exit=$?
+    set -e
     if [[ $eval_exit -eq 0 ]]; then
         echo "  Evaluation completed successfully."
         # Print the final results from the log

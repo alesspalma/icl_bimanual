@@ -24,10 +24,10 @@ task_init_rotation["bimanual_straighten_rope"]=280
 task_init_rotation["bimanual_take_tray_out_of_oven"]=-245
 
 for task in "${tasks[@]}"; do
-    agent="${task_agents[$task]}"
-    init_rot=${task_init_rotation[$task]}
+    agent="${task_agents[$task]:-RoboPromptAgentOnePerArm}"
+    init_rot=${task_init_rotation[$task]:-280}
     echo "Recording $agent on task: $task (init_rotation=$init_rot)"
-    mkdir -p "${log_dir}/${task}/videos"
+    mkdir -p "${log_dir}/${agent}/${task}/videos"
 
     xvfb-run -a -s "-screen 0 1280x1024x24" \
     python main.py \
@@ -39,7 +39,7 @@ for task in "${tasks[@]}"; do
         rlbench.episode_length=25 \
         rlbench.demo_path="$test_data_path" \
         framework.gpu=0 \
-        framework.logdir="${log_dir}/${task}" \
+        framework.logdir="${log_dir}/${agent}/${task}" \
         framework.eval_episodes=30 \
         framework.record_every_n=1 \
         rlbench.headless=True \
@@ -49,8 +49,8 @@ for task in "${tasks[@]}"; do
         cinematic_recorder.rotate_speed=0 \
         cinematic_recorder.init_rotation="$init_rot" \
         cinematic_recorder.fps=30 \
-        > "${log_dir}/${task}/run.log" 2>&1
+        > "${log_dir}/${agent}/${task}/run.log" 2>&1
 
-    echo "Done: ${task}. Videos saved to ${log_dir}/${task}/videos/"
+    echo "Done: ${task}. Videos saved to ${log_dir}/${agent}/${task}/videos/"
     echo ""
 done

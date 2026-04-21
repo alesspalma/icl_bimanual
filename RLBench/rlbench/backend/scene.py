@@ -24,7 +24,7 @@ from rlbench.backend.robot import UnimanualRobot
 from rlbench.backend.robot import BimanualRobot
 from rlbench.backend.spawn_boundary import SpawnBoundary
 from rlbench.backend.task import Task
-from rlbench.backend.utils import rgb_handles_to_mask, SIM_NAME_TO_REAL_NAME, point_to_voxel_index
+from rlbench.backend.utils import rgb_handles_to_mask, SIM_NAME_TO_REAL_NAME, point_to_voxel_index, normalize_quaternion, quaternion_to_discrete_euler
 from rlbench.demo import Demo
 from rlbench.noise_model import NoiseModel
 from rlbench.observation_config import ObservationConfig, CameraConfig
@@ -295,7 +295,7 @@ class Scene(object):
                 joint_forces=None
 
             if self._obs_config.gripper_open:
-                if gripper.get_open_amount()[0] > 0.95:
+                if (gripper.get_open_amount()[0] > 0.95) and (gripper.get_open_amount()[1] > 0.95):
                     gripper_open = 1.0
                 else:
                     gripper_open = 0.0
@@ -362,14 +362,20 @@ class Scene(object):
         for key, value in temp_mask_id_to_name_dict.items():
             misc_dict[key] = value
         
-        # Extract object positions for all relevant objects
+        # Extract object positions and orientations for all relevant objects
         object_positions = {}
+        object_orientations = {}
         for obj_name in SIM_NAME_TO_REAL_NAME[self.task.name]:
             obj = Object.get_object(obj_name)
             position = obj.get_position()
             voxel = point_to_voxel_index(position)
             object_positions[obj_name] = list(voxel)
+            quat = normalize_quaternion(obj.get_quaternion())
+            if quat[-1] < 0:
+                quat = -quat
+            object_orientations[obj_name] = list(quaternion_to_discrete_euler(quat))
         misc_dict['object_positions'] = object_positions
+        misc_dict['object_orientations'] = object_orientations
         
         observation_data.update({
             "task_low_dim_state": task_low_dim_state,
@@ -555,7 +561,7 @@ class Scene(object):
                     self._left_execute_demo_joint_position_action = left_path.get_executed_joint_position_action()
                     do_record()
 
-                    if self.no_self_collisions:
+                    if hasattr(self, 'no_self_collisions') and self.no_self_collisions:
                         all_objects = self.pyrep.get_objects_in_tree()
                         collision = False
                         for obj in all_objects: # first check if grippers are colliding with the other arm

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Parameters
-log_dir="/home/alessio/Desktop/icl_bimanual/logs"
-test_data_path="/home/alessio/Desktop/icl_bimanual/generated_data/test"
+log_dir="/media/nvme/palma/icl_bimanual/logs"
+test_data_path="/media/nvme/palma/icl_bimanual/generated_data/test"
 llm_call_style="openai"
 agent="LeaderFollower"
 mkdir -p "redirections/$llm_call_style/$agent"
