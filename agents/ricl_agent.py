@@ -237,12 +237,12 @@ class RICLAgent(Agent):
         # Save RGBs for logging
         for camera in CAMERAS:
             rgb_img = _extract_rgb(obs, camera)
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(
-                self.savedir, "rgb_dir", camera, str(self.episode_id)
-            )
-            os.makedirs(rgb_dir, exist_ok=True)
-            img.save(os.path.join(rgb_dir, f"{self.step}.png"))
+            # img = Image.fromarray(rgb_img)
+            # rgb_dir = os.path.join(
+            #     self.savedir, "rgb_dir", camera, str(self.episode_id)
+            # )
+            # os.makedirs(rgb_dir, exist_ok=True)
+            # img.save(os.path.join(rgb_dir, f"{self.step}.png"))
 
         if len(self.actions) != 0:
             return  # still executing cached actions

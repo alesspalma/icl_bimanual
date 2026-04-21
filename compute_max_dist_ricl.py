@@ -19,7 +19,7 @@ The script writes the chosen value (p99 by default) back to
 
 Usage (openpi venv):
     source ricl_openpi/.venv/bin/activate
-    python compute_max_dist.py [--stat max|p99|p95] [--tasks task1 task2 ...]
+    python compute_max_dist_ricl.py [--stat max|p99|p95] [--tasks task1 task2 ...]
 """
 
 import argparse

@@ -8,7 +8,10 @@ redirections/
 logs/
 /*.txt
 debug.py
-docker/
+./docker/
 dino-vit-features/
-ricl_openpi/
 latex/
+3d_flowmatch_actor/
+AGENTS.md
+ARCHITECTURE.md
+*.pdf

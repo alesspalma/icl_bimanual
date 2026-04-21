@@ -1,5 +1,6 @@
 from typing import List
 import re
+import time
 from yarr.agents.agent import Agent, Summary, ActResult
 import json
 import ast
@@ -9,14 +10,31 @@ import os
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
 from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+import openai
 from openai import OpenAI
 
-def openai_call(client, model_name, messages):
-    completion = client.chat.completions.create(
-        model=model_name,
-        messages=messages
-    )
-    return completion.choices[0].message.content
+_RETRYABLE = (
+    openai.APIConnectionError,
+    openai.InternalServerError,
+    openai.RateLimitError,
+)
+
+def openai_call(client, model_name, messages, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=messages
+            )
+            return completion.choices[0].message.content
+        except _RETRYABLE as e:
+            if attempt < max_retries - 1:
+                wait = min(2 ** attempt, 30)
+                print(f"openai_call retry {attempt + 1}/{max_retries}: {e!r}  "
+                      f"(sleeping {wait}s)")
+                time.sleep(wait)
+            else:
+                raise
 
 def huggingface_call(model, tokenizer, messages):
     text = tokenizer.apply_chat_template(
@@ -57,11 +75,11 @@ class LeaderFollowerConversational(Agent):
 
             rgb_dict[camera] = rgb_img
 
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
-            os.makedirs(rgb_dir, exist_ok=True)
-            # Save the image as PNG
-            img.save(os.path.join(rgb_dir, f'{self.step}.png'))
+            # img = Image.fromarray(rgb_img)
+            # rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
+            # os.makedirs(rgb_dir, exist_ok=True)
+            # # Save the image as PNG
+            # img.save(os.path.join(rgb_dir, f'{self.step}.png'))
 
             mask_id_to_sim_name.update(kwargs["mapping_dict"][f"{camera}_mask_id_to_name"])
 
@@ -70,11 +88,11 @@ class LeaderFollowerConversational(Agent):
 
             mask_dict[camera] = mask
 
-            mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
+            # mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
 
-            os.makedirs(mask_dir, exist_ok=True)
-            mask_pil = Image.fromarray(mask.astype(np.uint8))
-            mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))
+            # os.makedirs(mask_dir, exist_ok=True)
+            # mask_pil = Image.fromarray(mask.astype(np.uint8))
+            # mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))
 
             point_cloud = obs[f'{camera}_point_cloud'].cpu().squeeze().permute(1, 2, 0).numpy()
             point_cloud_dict[camera] = point_cloud
@@ -92,7 +110,13 @@ class LeaderFollowerConversational(Agent):
                     {"role": "system", "content": system_prompt_leader},
                     {"role": "user", "content": user_prompt_leader}
                 ]
-            output_text_leader = self.llm_call(messages)
+            try:
+                output_text_leader = self.llm_call(messages)
+            except Exception as e:
+                print(f"LeaderFollowerConversational leader call failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Prediction:", output_text_leader)
             output_list_leader = self._postprocess_single_arm(output_text_leader)
 
@@ -127,7 +151,13 @@ class LeaderFollowerConversational(Agent):
                     {"role": "system", "content": system_prompt_follower},
                     {"role": "user", "content": user_prompt_follower}
                 ]
-            output_text_follower = self.llm_call(messages_follower)
+            try:
+                output_text_follower = self.llm_call(messages_follower)
+            except Exception as e:
+                print(f"LeaderFollowerConversational follower call failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Prediction:", output_text_follower)
             output_list_follower = self._postprocess_single_arm(output_text_follower)
 
@@ -155,7 +185,13 @@ class LeaderFollowerConversational(Agent):
             messages.append({"role": "assistant", "content": output_text_leader})
             messages.append({"role": "user", "content": refinement_prompt_leader})
             
-            output_text_leader_refined = self.llm_call(messages)
+            try:
+                output_text_leader_refined = self.llm_call(messages)
+            except Exception as e:
+                print(f"LeaderFollowerConversational leader refinement failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Refined Leader Prediction:", output_text_leader_refined)
             output_list_leader_refined = self._postprocess_single_arm(output_text_leader_refined)
 
@@ -179,7 +215,13 @@ class LeaderFollowerConversational(Agent):
             messages_follower.append({"role": "assistant", "content": output_text_follower})
             messages_follower.append({"role": "user", "content": refinement_prompt_follower})
             
-            output_text_follower_refined = self.llm_call(messages_follower)
+            try:
+                output_text_follower_refined = self.llm_call(messages_follower)
+            except Exception as e:
+                print(f"LeaderFollowerConversational follower refinement failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Refined Follower Prediction:", output_text_follower_refined)
             output_list_follower_refined = self._postprocess_single_arm(output_text_follower_refined)
 

@@ -24,9 +24,6 @@ ROOT = "/home/alessio/Desktop/icl_bimanual/generated_data/train" # TODO: change 
 SYSTEM_PROMPT = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 SYSTEM_PROMPT_RIGHT = "You are the right arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 SYSTEM_PROMPT_LEFT = "You are the left arm of a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
-# SYSTEM_PROMPT_FOLLOWER_FILLIN = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Each action is the concatenation of the right arm and left arm actions. Then you will receive the last observation only with the right arm actions, and you need to replace ALL the X with the left arm actions matching the trend in the demos. Do not output anything else than the completed last list."
-SYSTEM_PROMPT_FOLLOWER_FILLIN = "You are a bimanual robot. Demos are in the format: observation>[action_list]. Each action in the list is 14 numbers: [7_right_arm_numbers, 7_left_arm_numbers]. You will be given the last observation with a partial list with X for the left arm. Fill in the X values. Output ONLY the completed list."
-SYSTEM_PROMPT_FOLLOWER = "You are a bimanual Franka Panda robot with parallel grippers. We provide you with some demos in the format of observation>[action_1, action_2, ...]. Then you will receive a new observation and you need to output a list of actions that matches the trend in the demos. Do not output anything else."
 
 
 # discretize translation, rotation, gripper open
@@ -353,7 +350,7 @@ class base_task_handler:
         path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "OnePerArmDummyContext", "Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong"]:
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
             examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
@@ -366,17 +363,13 @@ class base_task_handler:
                 actions_list = json.loads(actions_list)
                 right_actions = []
                 left_actions = []
-                for j, action in enumerate(actions_list):
-                    if type(agent).__name__ == "OnePerArmDummyContext":
-                        right_actions.append(action[:7]+[j]*7)
-                        left_actions.append(action[7:]+[j]*7)
-                    else:
-                        right_actions.append(action[:7])
-                        left_actions.append(action[7:])
+                for action in actions_list:
+                    right_actions.append(action[:7])
+                    left_actions.append(action[7:])
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             
-            if type(agent).__name__ in ["Validator", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "PingPong"]:
+            if type(agent).__name__ in ["BestOfN", "LeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
                 return right_demonstration + obs + ">", left_demonstration + obs + ">", demonstration + obs + ">"
             return right_demonstration + obs + ">", left_demonstration + obs + ">"
 
@@ -395,146 +388,6 @@ class base_task_handler:
                 os.makedirs(d, exist_ok=True)
                 with open(os.path.join(d, f'{i}.txt'), "w") as f:
                     f.write(output)
-
-class close_jar(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "jar_lid0": "lid",
-            "jar0": "jar",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class open_drawer(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "drawer_bottom": "drawer",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class slide_block_to_color_target(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "target1": "target",
-            "block": "block"
-        }
-        super().__init__(sim_name_to_real_name)
-
-class sweep_to_dustpan_of_size(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "dustpan_tall": "dustpan",
-            "broom_holder": "broom holder"
-        }
-        super().__init__(sim_name_to_real_name)
-
-class meat_off_grill(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "chicken_visual": "chicken",
-            "grill_visual": "grill"
-        }
-        super().__init__(sim_name_to_real_name)
-
-class turn_tap(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "tap_left_visual": "left tap",
-            "tap_right_visual": "right tap"
-        }
-        super().__init__(sim_name_to_real_name)
-
-class put_item_in_drawer(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "item": "item",
-            "drawer_frame": "drawer"
-        }
-        super().__init__(sim_name_to_real_name)
-
-class stack_blocks(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "stack_blocks_target0": "first block",
-            "stack_blocks_target1": "second block",
-            "stack_blocks_target2": "third block",
-            "stack_blocks_target3": "fourth block",
-            "stack_blocks_target_plane": "plane",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class light_bulb_in(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "bulb0": "bulb",
-            "lamp_screw": "lamp screw",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class put_money_in_safe(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "dollar_stack": "money",
-            "safe_body": "shelf",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class place_wine_at_rack_location(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "wine_bottle_visual": "wine",
-            "rack_top_visual": "rack",
-        }
-        super().__init__(sim_name_to_real_name)
-
-
-class put_groceries_in_cupboard(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "cupboard": "cupboard",
-            "crackers_visual": "cracker",
-        }
-        super().__init__(sim_name_to_real_name)
-
-
-class place_shape_in_shape_sorter(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "cube": "cube",
-            "shape_sorter": "shape sorter",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class push_buttons(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "target_button_wrap0": "button",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class insert_onto_square_peg(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "square_ring": "ring",
-            "pillar1": "spok",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class stack_cups(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "cup1_visual": "first cup",
-            "cup2_visual": "second cup",
-            "cup3_visual": "third cup",
-        }
-        super().__init__(sim_name_to_real_name)
-
-class place_cups(base_task_handler):
-    def __init__(self):
-        sim_name_to_real_name = {
-            "mug_visual1": "cup",
-            "place_cups_holder_spoke0": "holder"
-        }
-        super().__init__(sim_name_to_real_name)
 
 #####################################################
 
@@ -642,6 +495,23 @@ class bimanual_put_item_in_drawer(base_task_handler):
         }
         super().__init__(sim_name_to_real_name)
 
+class bimanual_close_jar(base_task_handler):
+    def __init__(self):
+        sim_name_to_real_name = {
+            "jar_lid0": "lid",
+            "jar0": "jar 1",
+            "jar1": "jar 2",
+            "handover": "handover"
+        }
+        super().__init__(sim_name_to_real_name)
+
+class bimanual_take_item_out_of_box(base_task_handler):
+    def __init__(self):
+        sim_name_to_real_name = {
+            "box_lid": "box"
+        }
+        super().__init__(sim_name_to_real_name)
+
 task_name_to_handler = {
                         "bimanual_handover_item": bimanual_handover_item,
                         "bimanual_dual_push_buttons": bimanual_dual_push_buttons,
@@ -656,6 +526,8 @@ task_name_to_handler = {
                         "bimanual_sweep_to_dustpan": bimanual_sweep_to_dustpan,
                         "bimanual_take_tray_out_of_oven": bimanual_take_tray_out_of_oven,
                         "bimanual_put_item_in_drawer": bimanual_put_item_in_drawer,
+                        "bimanual_close_jar": bimanual_close_jar,
+                        "bimanual_take_item_out_of_box": bimanual_take_item_out_of_box,
                         }
 
 def create_task_handler(task_name):

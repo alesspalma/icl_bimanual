@@ -1,6 +1,18 @@
-openai
-scipy
-torch
-six
-transformers
-accelerate
+# Core Python dependencies for icl_bimanual.
+# Excludes ad hoc installs: PyRep, RLBench, YARR, and openpi server extras.
+accelerate==1.10.0
+openai==1.100.2
+scipy==1.13.1
+six==1.17.0
+torch==2.8.0
+transformers==4.55.2
+
+hydra-core==1.0.5
+matplotlib==3.9.4
+numpy==1.26.4
+omegaconf==2.0.6
+open3d==0.19.0
+pillow==11.3.0
+pyrender==0.1.45
+tqdm==4.67.1
+trimesh==4.7.4

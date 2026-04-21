@@ -1,6 +1,6 @@
-# ICL Bimanual
+# BiCICLe (ICL Bimanual)
 
-In-Context Learning for bimanual robot manipulation in [RLBench](https://github.com/stepjam/RLBench). This repository extends the [RoboPrompt](https://arxiv.org/abs/2410.12782) framework to bimanual tasks and adds **RICL** — a retrieval-augmented VLA (Vision-Language-Action) baseline built on [Pi0-FAST](https://github.com/Physical-Intelligence/openpi).
+Codebase for **BiCICLe** (Bimanual Coordinated In-Context Learning): training-free in-context bimanual manipulation in [RLBench](https://github.com/stepjam/RLBench), with leader-follower coordination, **ArmsDebate** iterative refinement, and **BestOfN** selection. The repo also includes **RICL**, a retrieval-augmented VLA baseline built on [Pi0-FAST](https://github.com/Physical-Intelligence/openpi). Legacy `RoboPrompt*` agent names are kept only as baseline labels for comparability.
 
 **Evaluated on 13 bimanual RLBench tasks:**
 `bimanual_dual_push_buttons` · `bimanual_handover_item` · `bimanual_handover_item_easy` · `bimanual_lift_ball` · `bimanual_lift_tray` · `bimanual_pick_laptop` · `bimanual_pick_plate` · `bimanual_push_box` · `bimanual_put_bottle_in_fridge` · `bimanual_put_item_in_drawer` · `bimanual_straighten_rope` · `bimanual_sweep_to_dustpan` · `bimanual_take_tray_out_of_oven`
@@ -38,7 +38,7 @@ icl_bimanual/
 ├── form_icl_demonstrations.py      # Build text ICL prompts for LLM agents
 ├── form_icl_demonstrations_kat.py  # Build KAT (keypoint) ICL prompts
 ├── form_icl_demonstrations_ricl.py # Build RICL demo pools (DINOv2-embedded)
-├── compute_max_dist.py             # Recompute max_distance.json from your demo pool
+├── compute_max_dist_ricl.py        # Recompute max_distance.json from your demo pool
 ├── test_all_tasks.sh               # Evaluate all LLM/VLM baselines over 13 tasks
 ├── test_ricl.sh                    # Evaluate RICL over 13 tasks (server + eval loop)
 ├── agents/
@@ -48,10 +48,10 @@ icl_bimanual/
 │   ├── kat_agent_bimanual.py
 │   ├── kat_agent_oneperarm.py
 │   ├── leader_follower.py
-│   ├── leader_follower_fillin.py
 │   ├── leader_follower_conversational.py
 │   ├── vlm_leader_follower.py
-│   ├── ping_pong.py
+│   ├── arms_debate.py
+│   ├── arms_debate_bestofn.py
 │   ├── bestofn.py
 │   └── ...
 ├── ricl_openpi/                    # Pi0-FAST model + RICL policy server
@@ -207,13 +207,11 @@ your training data directory.
 | `KATAgentBimanual` | KAT baseline: DINO keypoint observations instead of object mask positions |
 | `KATAgentOnePerArm` | KAT one-per-arm variant |
 | `VLMLeaderFollower` | VLM-based leader-follower: right arm leads, left arm follows |
-| `LeaderFollower` | LLM leader-follower (text-only) |
-| `LeaderFollowerFillIn` | Right arm predicts full actions; LLM fills in left arm |
-| `LeaderFollowerConversational` | Multi-turn LLM leader-follower dialogue |
-| `PingPong` | Arms alternate querying the LLM |
-| `BestOfN` | Sample N completions, pick the best |
-| `OnePerArmDummyContext` | Ablation: one per arm with no ICL context |
-| `Validator` | Validates LLM outputs against task constraints |
+| `LeaderFollower` | Base BiCICLe leader-follower pipeline |
+| `ArmsDebate` | BiCICLe + iterative symmetric refinement |
+| `BestOfN` | BiCICLe + N candidate sampling with LLM-as-judge selection |
+| `ArmsDebateBestOfN` | Combined strategy: ArmsDebate candidates + BestOfN selection |
+| `LeaderFollowerConversational` | Conversational refinement ablation (appendix setting) |
 | `RICLAgent` | **RICL**: Pi0-FAST VLA with DINOv2-based retrieval augmentation |
 
 ---
@@ -222,7 +220,7 @@ your training data directory.
 
 ### Prepare ICL demonstrations
 
-**For RoboPrompt / text-LLM agents** — builds text-format ICL prompts from training data:
+**For text-LLM agents (including RoboPrompt baselines)** — builds text-format ICL prompts from training data:
 ```bash
 conda activate icl_bimanual
 # Edit ROOT in form_icl_demonstrations.py to point to your train data first
@@ -253,7 +251,7 @@ export OPENAI_API_KEY=your_key    # required for OpenAI models
 xvfb-run -a -s "-screen 0 1280x1024x24" python main.py \
     method.name=RoboPromptAgentOnePerArm \
     model.llm_call_style=openai \
-    model.name=gpt-4o \
+    model.name=gpt-5-mini \
     rlbench.tasks=[bimanual_push_box] \
     rlbench.task_name=bimanual_push_box \
     rlbench.episode_length=25 \
@@ -266,7 +264,7 @@ xvfb-run -a -s "-screen 0 1280x1024x24" python main.py \
 ```
 
 For local / HuggingFace models, set `model.llm_call_style=huggingface` and
-`model.name=Qwen/Qwen2-7B-Instruct` (or any HF-compatible model).
+`model.name=Qwen/Qwen2.5-7B-Instruct` (or any HF-compatible model).
 
 ---
 
@@ -326,13 +324,13 @@ source ricl_openpi/.venv/bin/activate
 cd /path/to/icl_bimanual
 
 # Dry run — inspect pairwise distance statistics without writing anything
-python compute_max_dist.py --dry_run
+python compute_max_dist_ricl.py --dry_run
 
 # Write the 99th-percentile pairwise distance (recommended)
-python compute_max_dist.py --stat p99
+python compute_max_dist_ricl.py --stat p99
 
 # Restrict to specific tasks if your pool spans multiple tasks
-python compute_max_dist.py --tasks bimanual_push_box bimanual_lift_tray
+python compute_max_dist_ricl.py --tasks bimanual_push_box bimanual_lift_tray
 ```
 
 ### 3. Start the policy server
@@ -413,7 +411,7 @@ Key RICL-specific arguments:
 | Arms overshoot or are jittery | Decrease `integration_dt` (try 0.02–0.03) |
 | ICL is ignored, arms follow model blindly | Decrease `--lamda` (try 0.3–0.5) |
 | One arm diverges when almost at goal | Use `--max_demo_frac=0.85` (already default) |
-| Retrieved demo looks wrong / out of distribution | Rerun `compute_max_dist.py` and check retrieval logs |
+| Retrieved demo looks wrong / out of distribution | Rerun `compute_max_dist_ricl.py` and check retrieval logs |
 
 ### 5. Full pipeline: `test_ricl.sh`
 
@@ -458,11 +456,11 @@ from the command line. The default config is [config.yaml](config.yaml).
 
 ```yaml
 method:
-    name: RoboPromptAgentBimanual   # agent class name (see Agents table above)
+    name: LeaderFollower            # agent class name (see Agents table above)
 
 model:
     llm_call_style: openai          # "openai" | "huggingface"
-    name: gpt-4-turbo               # model name or HuggingFace path
+    name: gpt-5-mini               # model name or HuggingFace path
     leader: right                   # leader arm for leader-follower agents
 
 rlbench:
@@ -507,6 +505,5 @@ tail -5 redirections/ricl/RICLAgent/bimanual_push_box.txt
 Built on top of:
 - [RLBench](https://github.com/stepjam/RLBench) — robot learning benchmark and simulation environment
 - [PerAct / YARR](https://github.com/peract/peract) — evaluation runner infrastructure
-- [RoboPrompt](https://github.com/davidyyd/roboprompt) — original LLM-based ICL framework for robot manipulation
 - [openpi / Pi0-FAST](https://github.com/Physical-Intelligence/openpi) — VLA model backbone used by RICL
 - [DINOv2](https://github.com/facebookresearch/dinov2) — visual embeddings for nearest-neighbour retrieval

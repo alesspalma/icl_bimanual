@@ -1,5 +1,6 @@
 from typing import List
 import re
+import time
 from yarr.agents.agent import Agent, Summary, ActResult
 import json
 import ast
@@ -7,16 +8,40 @@ import numpy as np
 from PIL import Image
 import os
 from json import JSONDecodeError
-from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT, SYSTEM_PROMPT_FOLLOWER
+from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
 from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+import openai
 from openai import OpenAI
+from agents.llm_tracking import LLMTrackingMixin
 
-def openai_call(client, model_name, messages):
-    completion = client.chat.completions.create(
-        model=model_name,
-        messages=messages
-    )
-    return completion.choices[0].message.content
+_RETRYABLE = (
+    openai.APIConnectionError,
+    openai.InternalServerError,
+    openai.RateLimitError,
+)
+
+def openai_call(client, model_name, messages, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=messages
+            )
+            content = completion.choices[0].message.content
+            usage = {
+                'prompt_tokens': completion.usage.prompt_tokens,
+                'completion_tokens': completion.usage.completion_tokens,
+                'total_tokens': completion.usage.total_tokens,
+            }
+            return content, usage
+        except _RETRYABLE as e:
+            if attempt < max_retries - 1:
+                wait = min(2 ** attempt, 30)
+                print(f"openai_call retry {attempt + 1}/{max_retries}: {e!r}  "
+                      f"(sleeping {wait}s)")
+                time.sleep(wait)
+            else:
+                raise
 
 def huggingface_call(model, tokenizer, messages):
     text = tokenizer.apply_chat_template(
@@ -35,9 +60,9 @@ def huggingface_call(model, tokenizer, messages):
     ]
 
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    return response
+    return response, None
 
-class LeaderFollower(Agent):
+class LeaderFollower(LLMTrackingMixin, Agent):
     def __init__(self, task_name, model_config):
         self.episode_id = -1
         self.device = 'cuda'
@@ -57,11 +82,11 @@ class LeaderFollower(Agent):
 
             rgb_dict[camera] = rgb_img
 
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
-            os.makedirs(rgb_dir, exist_ok=True)
-            # Save the image as PNG
-            img.save(os.path.join(rgb_dir, f'{self.step}.png'))
+            # img = Image.fromarray(rgb_img)
+            # rgb_dir = os.path.join(self.savedir, 'rgb_dir', camera, str(self.episode_id))
+            # os.makedirs(rgb_dir, exist_ok=True)
+            # # Save the image as PNG
+            # img.save(os.path.join(rgb_dir, f'{self.step}.png'))
 
             mask_id_to_sim_name.update(kwargs["mapping_dict"][f"{camera}_mask_id_to_name"])
 
@@ -70,11 +95,11 @@ class LeaderFollower(Agent):
 
             mask_dict[camera] = mask
 
-            mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
+            # mask_dir = os.path.join(self.savedir, 'input_masks', camera, str(self.episode_id))
 
-            os.makedirs(mask_dir, exist_ok=True)
-            mask_pil = Image.fromarray(mask.astype(np.uint8))
-            mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))
+            # os.makedirs(mask_dir, exist_ok=True)
+            # mask_pil = Image.fromarray(mask.astype(np.uint8))
+            # mask_pil.save(os.path.join(mask_dir, f'{self.step}.png'))
 
             point_cloud = obs[f'{camera}_point_cloud'].cpu().squeeze().permute(1, 2, 0).numpy()
             point_cloud_dict[camera] = point_cloud
@@ -91,7 +116,13 @@ class LeaderFollower(Agent):
                     {"role": "system", "content": system_prompt_leader},
                     {"role": "user", "content": user_prompt_leader}
                 ]
-            output_text_leader = self.llm_call(messages)
+            try:
+                output_text_leader = self.llm_call(messages)
+            except Exception as e:
+                print(f"LeaderFollower leader call failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Prediction:", output_text_leader)
             output_list_leader = self._postprocess_single_arm(output_text_leader)
 
@@ -118,15 +149,22 @@ class LeaderFollower(Agent):
             objects_dict[f'{self.leader}_arm'] = output_list_leader
             user_prompt_follower += str(objects_dict) + ">"
 
-            print(SYSTEM_PROMPT_FOLLOWER)
+            system_prompt_follower = SYSTEM_PROMPT_LEFT if self.leader == "right" else SYSTEM_PROMPT_RIGHT
+            print(system_prompt_follower)
             print()
             print(user_prompt_follower)
             
             messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT_FOLLOWER},
+                    {"role": "system", "content": system_prompt_follower},
                     {"role": "user", "content": user_prompt_follower}
                 ]
-            output_text_follower = self.llm_call(messages)
+            try:
+                output_text_follower = self.llm_call(messages)
+            except Exception as e:
+                print(f"LeaderFollower follower call failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Prediction:", output_text_follower)
             output_list_follower = self._postprocess_single_arm(output_text_follower)
 
@@ -268,6 +306,7 @@ class LeaderFollower(Agent):
         return []
 
     def reset(self):
+        self._finalize_episode_stats()
         super().reset()
         self.step = 0
         self.episode_id += 1
@@ -284,7 +323,7 @@ class LeaderFollower(Agent):
         if self.model_config.llm_call_style == "openai":
             print("using openai model")
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self.llm_call = lambda messages: openai_call(client, self.model_config.name, messages)
+            raw_call = lambda messages: openai_call(client, self.model_config.name, messages)
         elif self.model_config.llm_call_style == "huggingface":
             from transformers import AutoModelForCausalLM, AutoTokenizer
             print("loading model from huggingface")
@@ -297,7 +336,7 @@ class LeaderFollower(Agent):
             tokenizer = AutoTokenizer.from_pretrained(self.model_config.name)
             for param in model.parameters():
                 param.requires_grad = False # no fine-tuning
-            self.llm_call = lambda messages: huggingface_call(model, tokenizer, messages)
+            raw_call = lambda messages: huggingface_call(model, tokenizer, messages)
         elif self.model_config.llm_call_style == "vllm":
             print("using remote vllm-served model")
             client = OpenAI(
@@ -305,8 +344,9 @@ class LeaderFollower(Agent):
                 api_key="password",
             )
             model_name = "/leonardo_scratch/large/userexternal/apalma01/llm_models/" + self.model_config.name.split("/")[-1]
-            self.llm_call = lambda messages: openai_call(client, model_name, messages)
+            raw_call = lambda messages: openai_call(client, model_name, messages)
 
+        self._setup_tracking_if_enabled(raw_call)
         return
 
     def build(self, training: bool, device=None):

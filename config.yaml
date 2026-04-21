@@ -1,16 +1,17 @@
 method:
-    name: "RoboPromptAgentBimanual" # chooses the agent to use
+    name: "LeaderFollower" # chooses the agent to use
 
 model:
     llm_call_style: "openai"
-    name: "gpt-4-turbo"
+    name: "gpt-5-mini"
     leader: "right"  # "right" or "left"
     use_gt_obj_pos: False  # whether to use ground truth object positions at test time
+    track_llm_stats: False  # when True, track and report LLM token usage and latency per episode
 
 rlbench:
-    task_name: "close_jar"
+    task_name: "bimanual_push_box"
     cameras: [front,left_shoulder,right_shoulder,wrist] # overwritten at runtime in main.py
-    tasks: [close_jar]
+    tasks: [bimanual_push_box]
     demo_path: /my/demo/path
     episode_length: 25
     time_in_state: True

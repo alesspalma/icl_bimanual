@@ -19,6 +19,7 @@ from typing import List
 import re
 import json
 import os
+import time
 
 import numpy as np
 from PIL import Image
@@ -35,18 +36,35 @@ from form_icl_demonstrations_vlm import (
     _pil_to_data_url,
 )
 from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+import openai
 from openai import OpenAI
 import io
 
+_RETRYABLE = (
+    openai.APIConnectionError,
+    openai.InternalServerError,
+    openai.RateLimitError,
+)
+
 
 # ──────────────────── VLM call ────────────────────
-def vlm_call_openai(client, model_name, messages):
+def vlm_call_openai(client, model_name, messages, max_retries=5):
     """Send a multimodal (vision) request via the OpenAI-compatible API."""
-    completion = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-    )
-    return completion.choices[0].message.content
+    for attempt in range(max_retries):
+        try:
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+            )
+            return completion.choices[0].message.content
+        except _RETRYABLE as e:
+            if attempt < max_retries - 1:
+                wait = min(2 ** attempt, 30)
+                print(f"vlm_call_openai retry {attempt + 1}/{max_retries}: {e!r}  "
+                      f"(sleeping {wait}s)")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def _data_url_to_pil(data_url):
@@ -63,7 +81,7 @@ def huggingface_vlm_call(model, processor, messages):
 
     Accepts OpenAI-style multimodal messages (with ``image_url`` content
     blocks containing base64 data-URLs) and converts them to the format
-    expected by HuggingFace VLM processors (e.g. Qwen2-VL, LLaVA, etc.).
+    expected by HuggingFace VLM processors.
     """
     # Collect PIL images in order
     images: list = []
@@ -170,12 +188,12 @@ class VLMLeaderFollower(Agent):
             rgb_img = obs[f"{camera}_rgb"]
             rgb_img = rgb_img.squeeze().permute(1, 2, 0).cpu().numpy()
             rgb_img = np.clip(((rgb_img + 1.0) / 2 * 255).astype(np.uint8), 0, 255)
-            img = Image.fromarray(rgb_img)
-            rgb_dir = os.path.join(
-                self.savedir, "rgb_dir", camera, str(self.episode_id)
-            )
-            os.makedirs(rgb_dir, exist_ok=True)
-            img.save(os.path.join(rgb_dir, f"{self.step}.png"))
+            # img = Image.fromarray(rgb_img)
+            # rgb_dir = os.path.join(
+            #     self.savedir, "rgb_dir", camera, str(self.episode_id)
+            # )
+            # os.makedirs(rgb_dir, exist_ok=True)
+            # img.save(os.path.join(rgb_dir, f"{self.step}.png"))
 
         if len(self.actions) == 0:
             # ── 1. Build query image from live observation ────────────
@@ -200,7 +218,13 @@ class VLMLeaderFollower(Agent):
             print()
             print(leader_content[-1:][0])
 
-            output_text_leader = self.vlm_call(leader_messages)
+            try:
+                output_text_leader = self.vlm_call(leader_messages)
+            except Exception as e:
+                print(f"VLMLeaderFollower leader call failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Leader prediction: {output_text_leader}")
             output_list_leader = self._postprocess_single_arm(output_text_leader)
 
@@ -209,16 +233,23 @@ class VLMLeaderFollower(Agent):
                 combined_image, follower_examples, output_list_leader
             )
 
+            system_prompt_follower = SYSTEM_PROMPT_LEFT if self.leader == "right" else SYSTEM_PROMPT_RIGHT
             follower_messages = [
-                {"role": "system", "content": SYSTEM_PROMPT_FOLLOWER},
+                {"role": "system", "content": system_prompt_follower},
                 {"role": "user", "content": follower_content},
             ]
 
-            print(SYSTEM_PROMPT_FOLLOWER)
+            print(system_prompt_follower)
             print()
             print(follower_content[-1:][0])
 
-            output_text_follower = self.vlm_call(follower_messages)
+            try:
+                output_text_follower = self.vlm_call(follower_messages)
+            except Exception as e:
+                print(f"VLMLeaderFollower follower call failed: {e!r}")
+                return json.dumps(
+                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+                )
             print(f"Follower prediction: {output_text_follower}")
             output_list_follower = self._postprocess_single_arm(output_text_follower)
 

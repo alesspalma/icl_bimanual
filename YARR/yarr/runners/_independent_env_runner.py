@@ -147,7 +147,8 @@ class _IndependentEnvRunner(_EnvRunner):
             cam.set_pose(cam_placeholder.get_pose())
             cam.set_parent(cam_placeholder)
 
-            cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), rec_cfg.rotate_speed)
+            init_rot = np.deg2rad(rec_cfg.init_rotation) if hasattr(rec_cfg, 'init_rotation') else np.deg2rad(180)
+            cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), rec_cfg.rotate_speed, init_rotation=init_rot)
             tr = TaskRecorder(env, cam_motion, fps=rec_cfg.fps)
 
             env.env._action_mode.arm_action_mode.set_callable_each_step(tr.take_snap)

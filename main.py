@@ -19,12 +19,10 @@ from pyrep.const import RenderMode
 
 from agents.roboprompt_agent_bimanual import RoboPromptAgentBimanual
 from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
-from agents.oneperarm_dummycontext import OnePerArmDummyContext
-from agents.leader_follower_fillin import LeaderFollowerFillIn
 from agents.leader_follower import LeaderFollower
-from agents.validator import Validator
 from agents.bestofn import BestOfN
-from agents.ping_pong import PingPong
+from agents.arms_debate import ArmsDebate
+from agents.arms_debate_bestofn import ArmsDebateBestOfN
 from agents.leader_follower_conversational import LeaderFollowerConversational
 from agents.kat_agent_bimanual import KATAgentBimanual
 from agents.kat_agent_oneperarm import KATAgentOnePerArm
@@ -43,13 +41,11 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 agent_classes = {
     "RoboPromptAgentBimanual": RoboPromptAgentBimanual,
     "RoboPromptAgentOnePerArm": RoboPromptAgentOnePerArm,
-    "OnePerArmDummyContext": OnePerArmDummyContext,
-    "LeaderFollowerFillIn": LeaderFollowerFillIn,
     "LeaderFollower": LeaderFollower,
-    "Validator": Validator,
     "BestOfN": BestOfN,
     "LeaderFollowerConversational": LeaderFollowerConversational,
-    "PingPong": PingPong,
+    "ArmsDebate": ArmsDebate,
+    "ArmsDebateBestOfN": ArmsDebateBestOfN,
     "KATAgentBimanual": KATAgentBimanual,
     "KATAgentOnePerArm": KATAgentOnePerArm,
     "VLMLeaderFollower": VLMLeaderFollower,
@@ -157,6 +153,13 @@ def eval_seed(eval_cfg,
                               eval_cfg.framework.eval_save_metrics,
                               eval_cfg.cinematic_recorder)
 
+    llm_stats = None
+    if getattr(eval_cfg.model, 'track_llm_stats', False):
+        # The env runner deep-copies the agent, so stats live on the internal copy
+        internal_agent = env_runner._internal_env_runner._agent
+        if hasattr(internal_agent, 'get_raw_episode_stats'):
+            llm_stats = internal_agent.get_raw_episode_stats()
+
     # Delete objects in the reverse order they were created
     del save_load_lock, writer_lock, manager  # Delete multiprocessing objects
     del env_runner  # Delete the runner which contains references to other objects
@@ -165,13 +168,14 @@ def eval_seed(eval_cfg,
     gc.collect()
     torch.cuda.empty_cache()
 
-    return result, avg_collisions
+    return result, avg_collisions, llm_stats
 
 
 @hydra.main(config_name='config', config_path='.')
 def main(eval_cfg: DictConfig) -> None:
     results_list = []
     collisions_list = []
+    all_llm_episode_stats = []
     for i in range(eval_cfg.framework.repeat_eval):
         print(f"---------------------REPETITION NUMBER {i+1}---------------------")
         time.sleep(5)
@@ -181,9 +185,9 @@ def main(eval_cfg: DictConfig) -> None:
 
         start_seed = eval_cfg.framework.start_seed
         logdir = os.path.join(eval_cfg.framework.logdir,
-                                    eval_cfg.rlbench.task_name,
-                                    'RoboPrompt',
-                                    'seed%d' % start_seed)
+                        eval_cfg.rlbench.task_name,
+                        eval_cfg.method.name,
+                        'seed%d' % start_seed)
 
         env_device = 'cuda'
         logging.info('Using env device %s.' % str(env_device))
@@ -249,7 +253,7 @@ def main(eval_cfg: DictConfig) -> None:
                         eval_cfg.framework.record_every_n)
 
         logging.info('Evaluating seed %d.' % (eval_cfg.framework.seed + i))
-        result, avg_collisions = eval_seed(eval_cfg,
+        result, avg_collisions, llm_stats = eval_seed(eval_cfg,
                     logdir,
                     eval_cfg.rlbench.cameras,
                     env_device,
@@ -257,6 +261,8 @@ def main(eval_cfg: DictConfig) -> None:
                     env_config)
         results_list.append(result)
         collisions_list.append(avg_collisions)
+        if llm_stats:
+            all_llm_episode_stats.extend(llm_stats)
 
     # report avg and std of the experiments
     print("\n\nFinal results:")
@@ -264,6 +270,26 @@ def main(eval_cfg: DictConfig) -> None:
     print("Std:", np.std(results_list))
     print("Average Collisions:", np.mean(collisions_list))
     print("Std Collisions:", np.std(collisions_list))
+
+    if all_llm_episode_stats:
+        calls = [s['calls'] for s in all_llm_episode_stats]
+        prompt_tok = [s['prompt_tokens'] for s in all_llm_episode_stats]
+        comp_tok = [s['completion_tokens'] for s in all_llm_episode_stats]
+        total_tok = [s['total_tokens'] for s in all_llm_episode_stats]
+        wall = [s['wall_time'] for s in all_llm_episode_stats]
+        print("\n" + "="*70)
+        print("LLM CALL STATISTICS")
+        print("="*70)
+        print(f"Agent:              {eval_cfg.method.name}")
+        print(f"Model:              {eval_cfg.model.name}")
+        print(f"Episodes tracked:   {len(all_llm_episode_stats)}")
+        print(f"Calls/ep:           {np.mean(calls):.1f} +/- {np.std(calls):.1f}")
+        print(f"Prompt tok/ep:      {np.mean(prompt_tok):.0f} +/- {np.std(prompt_tok):.0f}")
+        print(f"Completion tok/ep:  {np.mean(comp_tok):.0f} +/- {np.std(comp_tok):.0f}")
+        print(f"Total tok/ep:       {np.mean(total_tok):.0f} +/- {np.std(total_tok):.0f}")
+        print(f"Median wall-time/ep: {np.median(wall):.2f}s (IQR: {np.percentile(wall, 25):.2f}-{np.percentile(wall, 75):.2f}s)")
+        print(f"Success rate:       {np.mean(results_list):.4f} +/- {np.std(results_list):.4f}")
+        print("="*70)
 
 if __name__ == '__main__':
     main()

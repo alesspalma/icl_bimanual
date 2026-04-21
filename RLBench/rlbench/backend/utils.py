@@ -298,4 +298,13 @@ SIM_NAME_TO_REAL_NAME = {
         "drawer_frame": "drawer",
         "item": "item"
     },
+    "bimanual_close_jar": {
+        "jar_lid0": "lid",
+        "jar0": "jar 1",
+        "jar1": "jar 2",
+        "handover": "handover"
+    },
+    "bimanual_take_item_out_of_box": {
+        "box_lid": "box",
+    }
 }

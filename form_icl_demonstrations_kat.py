@@ -422,13 +422,9 @@ class base_task_handler_kat:
                 actions_list = json.loads(actions_str)
                 right_actions = []
                 left_actions = []
-                for j, action in enumerate(actions_list):
-                    if type(agent).__name__ == "OnePerArmDummyContext":
-                        right_actions.append(action[:7] + [j] * 7)
-                        left_actions.append(action[7:] + [j] * 7)
-                    else:
-                        right_actions.append(action[:7])
-                        left_actions.append(action[7:])
+                for action in actions_list:
+                    right_actions.append(action[:7])
+                    left_actions.append(action[7:])
                 right_demonstration += objects_str + ">" + str(right_actions) + ", "
                 left_demonstration += objects_str + ">" + str(left_actions) + ", "
 
