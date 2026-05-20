@@ -10,7 +10,7 @@ model:
 
 rlbench:
     task_name: "bimanual_push_box"
-    cameras: [front,left_shoulder,right_shoulder,wrist] # overwritten at runtime in main.py
+    cameras: [front,over_shoulder_left,over_shoulder_right,overhead] # overwritten at runtime in main.py
     tasks: [bimanual_push_box]
     demo_path: /my/demo/path
     episode_length: 25

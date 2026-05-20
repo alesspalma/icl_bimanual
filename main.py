@@ -20,6 +20,7 @@ from pyrep.const import RenderMode
 from agents.roboprompt_agent_bimanual import RoboPromptAgentBimanual
 from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
 from agents.leader_follower import LeaderFollower
+from agents.adaptive_leader_follower import AdaptiveLeaderFollower
 from agents.bestofn import BestOfN
 from agents.arms_debate import ArmsDebate
 from agents.arms_debate_bestofn import ArmsDebateBestOfN
@@ -42,6 +43,7 @@ agent_classes = {
     "RoboPromptAgentBimanual": RoboPromptAgentBimanual,
     "RoboPromptAgentOnePerArm": RoboPromptAgentOnePerArm,
     "LeaderFollower": LeaderFollower,
+    "AdaptiveLeaderFollower": AdaptiveLeaderFollower,
     "BestOfN": BestOfN,
     "LeaderFollowerConversational": LeaderFollowerConversational,
     "ArmsDebate": ArmsDebate,

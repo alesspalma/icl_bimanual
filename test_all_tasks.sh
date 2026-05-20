@@ -4,10 +4,18 @@
 log_dir="/media/nvme/palma/icl_bimanual/logs"
 test_data_path="/media/nvme/palma/icl_bimanual/generated_data/test"
 llm_call_style="openai"
-agent="LeaderFollower"
+agent="AdaptiveLeaderFollower"
+export CUDA_VISIBLE_DEVICES=0
+
+if [[ "$llm_call_style" == "openai" && -z "${OPENAI_API_KEY:-}" ]]; then
+    echo "OPENAI_API_KEY is not set. Export it before running this script."
+    exit 1
+fi
+
 mkdir -p "redirections/$llm_call_style/$agent"
 
-methods=("bimanual_dual_push_buttons" "bimanual_handover_item_easy" "bimanual_handover_item" "bimanual_lift_ball" "bimanual_lift_tray" "bimanual_pick_laptop" "bimanual_pick_plate" "bimanual_push_box" "bimanual_put_bottle_in_fridge" "bimanual_put_item_in_drawer" "bimanual_straighten_rope" "bimanual_sweep_to_dustpan" "bimanual_take_tray_out_of_oven")
+# methods=("bimanual_dual_push_buttons" "bimanual_handover_item_easy" "bimanual_handover_item" "bimanual_lift_ball" "bimanual_lift_tray" "bimanual_pick_laptop" "bimanual_pick_plate")
+methods=("bimanual_push_box" "bimanual_put_bottle_in_fridge" "bimanual_put_item_in_drawer" "bimanual_straighten_rope" "bimanual_sweep_to_dustpan" "bimanual_take_tray_out_of_oven")
 
 # Loop through each method
 for method in "${methods[@]}"; do

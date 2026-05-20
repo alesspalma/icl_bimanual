@@ -350,7 +350,7 @@ class base_task_handler:
         path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "BestOfN", "LeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "BestOfN", "LeaderFollower", "AdaptiveLeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
             examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
@@ -369,7 +369,7 @@ class base_task_handler:
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             
-            if type(agent).__name__ in ["BestOfN", "LeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
+            if type(agent).__name__ in ["BestOfN", "LeaderFollower", "AdaptiveLeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
                 return right_demonstration + obs + ">", left_demonstration + obs + ">", demonstration + obs + ">"
             return right_demonstration + obs + ">", left_demonstration + obs + ">"
 
@@ -545,4 +545,3 @@ if __name__ == "__main__":
     for class_name in task_name_to_handler.values():
         handler = class_name()
         handler.save_in_context_demonstrations(use_gt_positions)
-
