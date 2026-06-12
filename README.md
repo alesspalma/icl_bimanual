@@ -8,7 +8,11 @@
 
 <p align="center">
   <strong>Alessio Palma, Indro Spinelli, Vignesh Prasad, Luca Scofano,<br>
-  Yufeng Jin, Georgia Chalvatzaki, Fabio Galasso</strong>
+  Yufeng Jin, Georgia Chalvatzaki<sup>&dagger;</sup>, Fabio Galasso<sup>&dagger;</sup></strong>
+</p>
+
+<p align="center">
+  <sup>&dagger;</sup>Equal supervision
 </p>
 
 <p align="center">
