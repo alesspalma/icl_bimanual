@@ -11,39 +11,11 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
-from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+from icl_utils import CAMERAS, dual_arm_discrete_actions_to_continuous, fallback_dual_arm_sequence, fallback_single_arm_sequence, get_rotation_resolution, get_voxel_size, sanitize_single_arm_action
 import openai
 from openai import OpenAI
 
 N_CANDIDATES = 5
-
-_VALIDATOR_SYSTEM = (
-    "You are a strict judge evaluating bimanual robot action plans.\n\n"
-    "CONTEXT: Two Franka Panda arms (right=indices 0-6, left=indices 7-13) in a 100x100x100 voxel workspace. "
-    "Each 14-dim action is [right_x, right_y, right_z, right_rot1, right_rot2, right_rot3, right_gripper, "
-    "left_x, left_y, left_z, left_rot1, left_rot2, left_rot3, left_gripper].\n\n"
-    "TASK: Score the CANDIDATE plan from 1 to 5. START AT 3 and adjust:\n\n"
-    "CHECK 1 \u2014 Arm collision risk (+1 or -1):\n"
-    "  At each timestep, compute the Euclidean distance between right [x,y,z] and left [x,y,z]. "
-    "If ANY step has distance < 10 voxels AND both arms are actively moving (not stationary), that is a collision risk: -1. "
-    "If all steps have safe separation: +1.\n\n"
-    "CHECK 2 \u2014 Target + trajectory match vs demos (+1 or -1):\n"
-    "  Does the candidate approach the SAME objects as in demos (first action within 5 voxels of demo first action)? "
-    "Does the z-trajectory follow the same shape (e.g. approach high, descend to grasp, lift)? "
-    "Both must be true for +1. Either failing: -1.\n\n"
-    "CHECK 3 \u2014 Gripper logic (0 or -1):\n"
-    "  For EACH arm: does the gripper open/close at the correct step relative to when the arm reaches the object? "
-    "Closing too early (before reaching), or gripper sequence inverted vs demos: -1.\n\n"
-    "CHECK 4 \u2014 Workspace reachability (0 or -1):\n"
-    "  Right arm should mostly operate in x > 30 (its reachable zone). Left arm should mostly operate in x < 70. "
-    "If an arm consistently reaches into the opposite side of the workspace (>3 steps): -1.\n\n"
-    "Final score = 3 + check1 + check2 + check3 + check4, clamped to [1, 5].\n\n"
-    "You MUST show your work for each check, then give the final score.\n"
-    "Output ONLY valid JSON:\n"
-    '{"check1": "+1 or -1: <reason>", "check2": "+1 or -1: <reason>", '
-    '"check3": "0 or -1: <reason>", "check4": "0 or -1: <reason>", "score": <int 1-5>}'
-)
-
 
 _RETRYABLE = (
     openai.APIConnectionError,
@@ -97,10 +69,39 @@ class ArmsDebateBestOfN(Agent):
         self.model_config = model_config
         self.leader = model_config.leader
         self.follower = "left" if self.leader == "right" else "right"
+        self.voxel_size = get_voxel_size(model_config)
+        self.rotation_resolution = get_rotation_resolution(model_config)
+        voxel_scale = self.voxel_size / 100
 
         # Use the same system prompts as the base ArmsDebate agent
         self._sys_leader = SYSTEM_PROMPT_RIGHT if self.leader == "right" else SYSTEM_PROMPT_LEFT
         self._sys_follower = SYSTEM_PROMPT_LEFT if self.leader == "right" else SYSTEM_PROMPT_RIGHT
+        self._validator_system = (
+            "You are a strict judge evaluating bimanual robot action plans.\n\n"
+            f"CONTEXT: Two Franka Panda arms (right=indices 0-6, left=indices 7-13) in a {self.voxel_size}x{self.voxel_size}x{self.voxel_size} voxel workspace. "
+            "Each 14-dim action is [right_x, right_y, right_z, right_rot1, right_rot2, right_rot3, right_gripper, "
+            "left_x, left_y, left_z, left_rot1, left_rot2, left_rot3, left_gripper].\n\n"
+            "TASK: Score the CANDIDATE plan from 1 to 5. START AT 3 and adjust:\n\n"
+            "CHECK 1 \u2014 Arm collision risk (+1 or -1):\n"
+            "  At each timestep, compute the Euclidean distance between right [x,y,z] and left [x,y,z]. "
+            f"If ANY step has distance < {round(10 * voxel_scale, 1)} voxels AND both arms are actively moving (not stationary), that is a collision risk: -1. "
+            "If all steps have safe separation: +1.\n\n"
+            "CHECK 2 \u2014 Target + trajectory match vs demos (+1 or -1):\n"
+            f"  Does the candidate approach the SAME objects as in demos (first action within {round(5 * voxel_scale, 1)} voxels of demo first action)? "
+            "Does the z-trajectory follow the same shape (e.g. approach high, descend to grasp, lift)? "
+            "Both must be true for +1. Either failing: -1.\n\n"
+            "CHECK 3 \u2014 Gripper logic (0 or -1):\n"
+            "  For EACH arm: does the gripper open/close at the correct step relative to when the arm reaches the object? "
+            "Closing too early (before reaching), or gripper sequence inverted vs demos: -1.\n\n"
+            "CHECK 4 \u2014 Workspace reachability (0 or -1):\n"
+            f"  Right arm should mostly operate in x > {round(30 * voxel_scale, 1)} (its reachable zone). Left arm should mostly operate in x < {round(70 * voxel_scale, 1)}. "
+            "If an arm consistently reaches into the opposite side of the workspace (>3 steps): -1.\n\n"
+            "Final score = 3 + check1 + check2 + check3 + check4, clamped to [1, 5].\n\n"
+            "You MUST show your work for each check, then give the final score.\n"
+            "Output ONLY valid JSON:\n"
+            '{"check1": "+1 or -1: <reason>", "check2": "+1 or -1: <reason>", '
+            '"check3": "0 or -1: <reason>", "check4": "0 or -1: <reason>", "score": <int 1-5>}'
+        )
 
     # ── Observation preprocessing ────────────────────────────────────────────
 
@@ -276,7 +277,7 @@ class ArmsDebateBestOfN(Agent):
         )
 
         response = self.llm_call([
-            {"role": "system", "content": _VALIDATOR_SYSTEM},
+            {"role": "system", "content": self._validator_system},
             {"role": "user", "content": prompt_content}
         ])
 
@@ -326,14 +327,14 @@ class ArmsDebateBestOfN(Agent):
             if len(np.array(actions).shape) == 1:
                 actions = [actions]
         except Exception as e:
-            actions = [[57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+            actions = fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
             print(e)
             print('Error when parsing actions')
         output = []
         for action in actions:
-            if len(action) != 7:
-                action = [57, 49, 87, 0, 39, 0, 1]
-            output.append(action)
+            output.append(sanitize_single_arm_action(action, self.voxel_size, self.rotation_resolution))
+        if not output:
+            return fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
         return output[:26]
 
     def _postprocess_dual_arm(self, output_text):
@@ -359,32 +360,14 @@ class ArmsDebateBestOfN(Agent):
                             output_text = output_text[1:]
                         actions = np.array(json.loads('[' + output_text + ']'))
         except Exception as e:
-            actions = [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1]
-                       for _ in range(26)]
+            actions = fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
             print(e)
             print('Error when parsing actions')
-        if len(np.array(actions).shape) == 1:
-            actions = [actions]
-        output = []
-        for action in actions:
-            if len(action) != 14:
-                action = [57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1]
-            temp_actions = []
-            for i in range(2):
-                arm_action = action[i * 7:(i + 1) * 7]
-                trans_indicies = np.array(arm_action[:3])
-                rot_and_grip_indicies = np.array(arm_action[3:6])
-                is_gripper_open = 1 if arm_action[6] >= 0.5 else 0
-                bounds = SCENE_BOUNDS
-                res = (bounds[3:] - bounds[:3]) / 100
-                attention_coordinate = bounds[:3] + res * trans_indicies + res / 2
-                quat = discrete_euler_to_quaternion(rot_and_grip_indicies)
-                continuous_action = np.concatenate([
-                    attention_coordinate, quat, [is_gripper_open], [1],
-                ])
-                temp_actions.append(continuous_action)
-            output.append(np.concatenate(temp_actions, axis=0))
-        return output[:26]
+        return dual_arm_discrete_actions_to_continuous(
+            actions,
+            self.voxel_size,
+            self.rotation_resolution,
+        )
 
     # ── Main act loop ────────────────────────────────────────────────────────
 
@@ -405,7 +388,7 @@ class ArmsDebateBestOfN(Agent):
 
             # 3. Generate N candidates in parallel (each runs 4 sequential LLM calls)
             _DEFAULT_CANDIDATE = json.dumps(
-                [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1]] * 4
+                fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
             )
             candidates = [None] * N_CANDIDATES
             with ThreadPoolExecutor(max_workers=N_CANDIDATES) as pool:
@@ -471,7 +454,7 @@ class ArmsDebateBestOfN(Agent):
 
     def load_weights(self, savedir: str):
         self.savedir = savedir
-        self.handler = create_task_handler(self.task_name)
+        self.handler = create_task_handler(self.task_name, self.model_config)
 
         if self.model_config.llm_call_style == "openai":
             print("using openai model")

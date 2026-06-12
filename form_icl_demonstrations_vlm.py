@@ -37,6 +37,9 @@ from icl_utils import (
     quaternion_to_discrete_euler,
     CAMERAS,
     IMAGE_SIZE,
+    get_demonstrations_dir,
+    get_rotation_resolution,
+    get_voxel_size,
 )
 from helpers.demo_loading_utils import keypoint_discovery
 
@@ -74,13 +77,13 @@ SYSTEM_PROMPT_FOLLOWER = (
 
 
 # ──────────────────── Action helper (same discretisation) ────────────────────
-def _get_action(obs_tp1, obs_tm1):
+def _get_action(obs_tp1, obs_tm1, voxel_size=100, rotation_resolution=5):
     """Discretise translation, rotation, gripper open."""
     quat = normalize_quaternion(obs_tp1.gripper_pose[3:])
     if quat[-1] < 0:
         quat = -quat
-    disc_rot = quaternion_to_discrete_euler(quat)
-    index = point_to_voxel_index(obs_tp1.gripper_pose[:3])
+    disc_rot = quaternion_to_discrete_euler(quat, rotation_resolution)
+    index = point_to_voxel_index(obs_tp1.gripper_pose[:3], voxel_size)
     rot_and_grip = disc_rot.tolist()
     rot_and_grip.extend([int(obs_tp1.gripper_open)])
     return index.tolist() + rot_and_grip
@@ -172,11 +175,23 @@ class base_task_handler_vlm:
     rather than text-based object positions or keypoints.
     """
 
-    def __init__(self):
+    def __init__(self, voxel_size=100, rotation_resolution=5, demonstrations_dir=None):
         self.save_root = os.path.join(ROOT, type(self).__name__)
+        self.voxel_size = int(voxel_size)
+        self.rotation_resolution = float(rotation_resolution)
+        default_dir = get_demonstrations_dir(
+            voxel_size=self.voxel_size,
+            rotation_resolution=self.rotation_resolution,
+        )
+        if default_dir == "demonstrations":
+            default_dir = "vlm_demonstrations"
+        else:
+            default_dir = "vlm_" + default_dir
+        self.demonstrations_dirname = default_dir if demonstrations_dir is None else demonstrations_dir
         self.num_demos = 10
         print(f"[VLM] Task handler {type(self).__name__} "
-              f"using demonstrations from {self.save_root}")
+              f"using demonstrations from {os.path.join(self.save_root, self.demonstrations_dirname)} "
+              f"(voxel_size={self.voxel_size}, rotation_resolution={self.rotation_resolution})")
 
     # ── Test-time prompt construction ──────────────────────────────────
     def get_user_prompt(self, combined_image_pil, agent):
@@ -203,7 +218,7 @@ class base_task_handler_vlm:
 
         # Pick a random batch of pre-saved demonstrations
         demo_files = glob.glob(
-            os.path.join(self.save_root, "vlm_demonstrations", "*.json"))
+            os.path.join(self.save_root, self.demonstrations_dirname, "*.json"))
         path = random.choice(demo_files)
         with open(path, "r") as f:
             demos = json.load(f)
@@ -332,8 +347,14 @@ class base_task_handler_vlm:
             actions = []
             for keypoint in episode_keypoints:
                 obs_tp1 = demo[keypoint]
-                action_right = _get_action(obs_tp1.right, obs_tp1.right)
-                action_left = _get_action(obs_tp1.left, obs_tp1.left)
+                action_right = _get_action(
+                    obs_tp1.right, obs_tp1.right,
+                    self.voxel_size, self.rotation_resolution,
+                )
+                action_left = _get_action(
+                    obs_tp1.left, obs_tp1.left,
+                    self.voxel_size, self.rotation_resolution,
+                )
                 actions.append(action_right + action_left)
 
             all_demos.append({
@@ -343,7 +364,7 @@ class base_task_handler_vlm:
             })
 
         # Batch into groups of num_demos and save as JSON
-        demo_dir = os.path.join(self.save_root, "vlm_demonstrations")
+        demo_dir = os.path.join(self.save_root, self.demonstrations_dirname)
         os.makedirs(demo_dir, exist_ok=True)
         for i, start_idx in enumerate(range(0, len(all_demos), self.num_demos)):
             if start_idx + self.num_demos <= len(all_demos):
@@ -414,8 +435,14 @@ task_name_to_handler = {
 }
 
 
-def create_task_handler(task_name):
-    return task_name_to_handler[task_name]()
+def create_task_handler(task_name, model_config=None, **kwargs):
+    if model_config is not None:
+        kwargs.setdefault("voxel_size", get_voxel_size(model_config))
+        kwargs.setdefault("rotation_resolution", get_rotation_resolution(model_config))
+        explicit_dir = getattr(model_config, "demonstrations_dir", None)
+        if explicit_dir is not None:
+            kwargs.setdefault("demonstrations_dir", explicit_dir)
+    return task_name_to_handler[task_name](**kwargs)
 
 
 if __name__ == "__main__":
@@ -428,6 +455,9 @@ if __name__ == "__main__":
         default=None,
         help="Task names to process (default: all bimanual tasks)",
     )
+    parser.add_argument("--voxel_size", type=int, default=100)
+    parser.add_argument("--rotation_resolution", type=float, default=5)
+    parser.add_argument("--demonstrations_dir", default=None)
     args = parser.parse_args()
 
     tasks = args.tasks if args.tasks else list(task_name_to_handler.keys())
@@ -435,5 +465,9 @@ if __name__ == "__main__":
         print(f"\n{'=' * 60}")
         print(f"Processing task: {task_name}")
         print(f"{'=' * 60}")
-        handler = task_name_to_handler[task_name]()
+        handler = task_name_to_handler[task_name](
+            voxel_size=args.voxel_size,
+            rotation_resolution=args.rotation_resolution,
+            demonstrations_dir=args.demonstrations_dir,
+        )
         handler.save_in_context_demonstrations()

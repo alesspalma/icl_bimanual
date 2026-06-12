@@ -7,6 +7,9 @@ model:
     leader: "right"  # "right" or "left"
     use_gt_obj_pos: False  # whether to use ground truth object positions at test time
     track_llm_stats: False  # when True, track and report LLM token usage and latency per episode
+    voxel_size: 100
+    rotation_resolution: 5
+    demonstrations_dir: null  # null uses demonstrations for defaults, otherwise demonstrations_vox*_rot*
 
 rlbench:
     task_name: "bimanual_push_box"

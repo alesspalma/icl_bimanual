@@ -33,6 +33,9 @@ from icl_utils import (
     quaternion_to_discrete_euler,
     CAMERAS,
     IMAGE_SIZE,
+    get_demonstrations_dir,
+    get_rotation_resolution,
+    get_voxel_size,
 )
 from helpers.demo_loading_utils import keypoint_discovery
 
@@ -73,14 +76,14 @@ DEPTH_SCALE = 2 ** 24 - 1   # depth encoding scale used by RLBench
 
 
 # ──────────────────── Action helpers (same as original) ────────────────────
-def _get_action(obs_tp1, obs_tm1):
+def _get_action(obs_tp1, obs_tm1, voxel_size=100, rotation_resolution=5):
     """Discretize translation, rotation, gripper open."""
     quat = normalize_quaternion(obs_tp1.gripper_pose[3:])
     if quat[-1] < 0:
         quat = -quat
-    disc_rot = quaternion_to_discrete_euler(quat)
+    disc_rot = quaternion_to_discrete_euler(quat, rotation_resolution)
     trans_indicies = []
-    index = point_to_voxel_index(obs_tp1.gripper_pose[:3])
+    index = point_to_voxel_index(obs_tp1.gripper_pose[:3], voxel_size)
     trans_indicies.extend(index.tolist())
     rot_and_grip_indicies = disc_rot.tolist()
     rot_and_grip_indicies.extend([int(obs_tp1.gripper_open)])
@@ -199,7 +202,14 @@ def _extract_keypoints_2d(image_path, descriptor_vectors, num_patches):
 
 
 # ──────────────────── Observation formation ────────────────────
-def _form_obs_kat(epis_path, frame_idx, descriptor_vectors, num_patches, camera=KAT_CAMERA):
+def _form_obs_kat(
+    epis_path,
+    frame_idx,
+    descriptor_vectors,
+    num_patches,
+    camera=KAT_CAMERA,
+    voxel_size=100,
+):
     """
     Build a KAT-style observation: a list of discretized 3-D keypoint positions.
 
@@ -227,14 +237,15 @@ def _form_obs_kat(epis_path, frame_idx, descriptor_vectors, num_patches, camera=
     # Discretize to voxel indices (same grid as the original project)
     voxel_keypoints = []
     for wp in world_points:
-        voxel = point_to_voxel_index(np.array(wp))
+        voxel = point_to_voxel_index(np.array(wp), voxel_size)
         voxel_keypoints.append(voxel.tolist())
 
     return str(voxel_keypoints)
 
 
 def _form_obs_kat_test_pointcloud(rgb_image_np, point_cloud_hw3,
-                                  descriptor_vectors, num_patches):
+                                  descriptor_vectors, num_patches,
+                                  voxel_size=100):
     """
     KAT observation at test-time using a world-frame point cloud.
 
@@ -269,7 +280,7 @@ def _form_obs_kat_test_pointcloud(rgb_image_np, point_cloud_hw3,
         x_native = np.clip(x_native, 0, img_w - 1)
 
         world_point = point_cloud_hw3[y_native, x_native]
-        voxel = point_to_voxel_index(world_point)
+        voxel = point_to_voxel_index(world_point, voxel_size)
         voxel_keypoints.append(voxel.tolist())
 
     return str(voxel_keypoints)
@@ -277,28 +288,36 @@ def _form_obs_kat_test_pointcloud(rgb_image_np, point_cloud_hw3,
 
 # ──────────────────── Replay buffer building ────────────────────
 def _add_keypoints_to_replay(buffer, frame_idx, demo, episode_keypoints,
-                             epis_path, descriptor_vectors, num_patches):
+                             epis_path, descriptor_vectors, num_patches,
+                             voxel_size, rotation_resolution):
     """
     Append one (observation, actions) pair to the buffer.
 
     observation : KAT keypoint-based voxelized 3-D positions
     actions     : list of discretized bimanual actions at each keyframe
     """
-    obs = _form_obs_kat(epis_path, frame_idx, descriptor_vectors, num_patches)
+    obs = _form_obs_kat(
+        epis_path, frame_idx, descriptor_vectors, num_patches,
+        voxel_size=voxel_size,
+    )
 
     buffer.append(obs)
 
     actions = []
     for keypoint in episode_keypoints:
         obs_tp1 = demo[keypoint]
-        action_right = _get_action(obs_tp1.right, obs_tp1.right)
-        action_left = _get_action(obs_tp1.left, obs_tp1.left)
+        action_right = _get_action(
+            obs_tp1.right, obs_tp1.right, voxel_size, rotation_resolution
+        )
+        action_left = _get_action(
+            obs_tp1.left, obs_tp1.left, voxel_size, rotation_resolution
+        )
         actions.append(action_right + action_left)
 
     buffer.append(actions)
 
 
-def get_stored_demos(dataset_root, task_name, amount):
+def get_stored_demos(dataset_root, task_name, amount, voxel_size, rotation_resolution):
     """
     Load `amount` episodes for `task_name`, extract KAT observations + actions.
 
@@ -330,6 +349,7 @@ def get_stored_demos(dataset_root, task_name, amount):
         _add_keypoints_to_replay(
             tmp, 0, demo, episode_keypoints, epis_path,
             descriptor_vectors, num_patches,
+            voxel_size, rotation_resolution,
         )
         buffer.append(tmp)
 
@@ -344,12 +364,27 @@ class base_task_handler_kat:
     KAT variant of the task handler. Observations are DINO keypoints
     instead of named object positions.
     """
-    def __init__(self):
+    def __init__(self, voxel_size=100, rotation_resolution=5, demonstrations_dir=None):
         self.save_root = os.path.join(ROOT, type(self).__name__)
+        self.voxel_size = int(voxel_size)
+        self.rotation_resolution = float(rotation_resolution)
+        default_dir = get_demonstrations_dir(
+            voxel_size=self.voxel_size,
+            rotation_resolution=self.rotation_resolution,
+        )
+        if default_dir == "demonstrations":
+            default_dir = "kat_demonstrations"
+        else:
+            default_dir = "kat_" + default_dir
+        self.demonstrations_dirname = default_dir if demonstrations_dir is None else demonstrations_dir
         self.num_demos = 10
         self.descriptor_vectors = None
         self.num_patches = None
-        print(f"[KAT] Task handler {type(self).__name__} using demonstrations from {self.save_root}")
+        print(
+            f"[KAT] Task handler {type(self).__name__} using demonstrations from "
+            f"{os.path.join(self.save_root, self.demonstrations_dirname)} "
+            f"(voxel_size={self.voxel_size}, rotation_resolution={self.rotation_resolution})"
+        )
 
     def _ensure_descriptors(self):
         """Load pre-computed descriptors from disk, or compute on-the-fly."""
@@ -397,11 +432,12 @@ class base_task_handler_kat:
         obs = _form_obs_kat_test_pointcloud(
             rgb_img, point_cloud,
             self.descriptor_vectors, self.num_patches,
+            self.voxel_size,
         )
 
         # Load a random pre-saved demonstration batch
         path = random.choice(
-            glob.glob(os.path.join(self.save_root, "kat_demonstrations", "*.txt"))
+            glob.glob(os.path.join(self.save_root, self.demonstrations_dirname, "*.txt"))
         )
         demonstration = open(path, "r").read()
 
@@ -440,6 +476,8 @@ class base_task_handler_kat:
         """
         train_demos, descriptor_vectors, num_patches = get_stored_demos(
             ROOT, type(self).__name__, 100,
+            self.voxel_size,
+            self.rotation_resolution,
         )
         self.descriptor_vectors = descriptor_vectors
         self.num_patches = num_patches
@@ -461,7 +499,7 @@ class base_task_handler_kat:
                 for epi in train_demos[start_idx : start_idx + self.num_demos]:
                     output += f"{epi[0]}>{epi[1]}, "
 
-                d = os.path.join(self.save_root, "kat_demonstrations")
+                d = os.path.join(self.save_root, self.demonstrations_dirname)
                 os.makedirs(d, exist_ok=True)
                 with open(os.path.join(d, f"{i}.txt"), "w") as f:
                     f.write(output)
@@ -527,8 +565,14 @@ task_name_to_handler = {
 }
 
 
-def create_task_handler(task_name):
-    return task_name_to_handler[task_name]()
+def create_task_handler(task_name, model_config=None, **kwargs):
+    if model_config is not None:
+        kwargs.setdefault("voxel_size", get_voxel_size(model_config))
+        kwargs.setdefault("rotation_resolution", get_rotation_resolution(model_config))
+        explicit_dir = getattr(model_config, "demonstrations_dir", None)
+        if explicit_dir is not None:
+            kwargs.setdefault("demonstrations_dir", explicit_dir)
+    return task_name_to_handler[task_name](**kwargs)
 
 
 if __name__ == "__main__":
@@ -553,6 +597,9 @@ if __name__ == "__main__":
         default=KAT_CAMERA,
         help=f"Camera to use for keypoint extraction (default: {KAT_CAMERA})",
     )
+    parser.add_argument("--voxel_size", type=int, default=100)
+    parser.add_argument("--rotation_resolution", type=float, default=5)
+    parser.add_argument("--demonstrations_dir", default=None)
     args = parser.parse_args()
 
     # Allow overriding globals from CLI
@@ -564,5 +611,9 @@ if __name__ == "__main__":
         print(f"\n{'='*60}")
         print(f"Processing task: {task_name}")
         print(f"{'='*60}")
-        handler = task_name_to_handler[task_name]()
+        handler = task_name_to_handler[task_name](
+            voxel_size=args.voxel_size,
+            rotation_resolution=args.rotation_resolution,
+            demonstrations_dir=args.demonstrations_dir,
+        )
         handler.save_in_context_demonstrations()

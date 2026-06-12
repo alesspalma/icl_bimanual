@@ -8,7 +8,7 @@ from PIL import Image
 import os
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
-from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+from icl_utils import CAMERAS, fallback_single_arm_sequence, get_rotation_resolution, get_voxel_size, single_arm_discrete_actions_to_continuous
 import openai
 from openai import OpenAI
 from agents.llm_tracking import LLMTrackingMixin
@@ -67,6 +67,8 @@ class RoboPromptAgentOnePerArm(LLMTrackingMixin, Agent):
         self.device = 'cuda'
         self.task_name = task_name
         self.model_config = model_config
+        self.voxel_size = get_voxel_size(model_config)
+        self.rotation_resolution = get_rotation_resolution(model_config)
         
     def _preprocess(self, obs, step, **kwargs):
         rgb_dict = {}
@@ -117,7 +119,7 @@ class RoboPromptAgentOnePerArm(LLMTrackingMixin, Agent):
                     output_text_right = self.llm_call(messages)
                 except Exception as e:
                     print(f"RoboPromptAgentOnePerArm right-arm call failed: {e!r}")
-                    fallback = json.dumps([[57, 49, 87, 0, 39, 0, 1] for _ in range(26)])
+                    fallback = json.dumps(fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution))
                     return fallback, fallback
                 print(f"Prediction:", output_text_right)
 
@@ -135,7 +137,7 @@ class RoboPromptAgentOnePerArm(LLMTrackingMixin, Agent):
                     output_text_left = self.llm_call(messages)
                 except Exception as e:
                     print(f"RoboPromptAgentOnePerArm left-arm call failed: {e!r}")
-                    fallback = json.dumps([[57, 49, 87, 0, 39, 0, 1] for _ in range(26)])
+                    fallback = json.dumps(fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution))
                     return fallback, fallback
                 print(f"Prediction:", output_text_left)
 
@@ -155,34 +157,14 @@ class RoboPromptAgentOnePerArm(LLMTrackingMixin, Agent):
                 else:
                     actions = np.array(json.loads(output_text))
         except Exception as e:
-            actions = [[57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+            actions = fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution)
             print(e)
             print('Error when parsing actions')
-        if len(np.array(actions).shape) == 1:
-            actions = [actions]
-        output = []
-        for action in actions:
-            if len(action) != 7:
-                action = [57, 49, 87, 0, 39, 0, 1]
-            trans_indicies = np.array(action[:3])
-            rot_and_grip_indicies = np.array(action[3:6])
-            is_gripper_open = 1 if action[6] >= 0.5 else 0
-
-            bounds = SCENE_BOUNDS
-            res = (bounds[3:] - bounds[:3]) / 100
-            attention_coordinate = bounds[:3] + res * trans_indicies + res / 2
-            quat = discrete_euler_to_quaternion(rot_and_grip_indicies)
-            
-            continuous_action = np.concatenate([
-                attention_coordinate,
-                quat,
-                [is_gripper_open],
-                [1],
-            ])
-            output.append(continuous_action)
-        
-        # get subsequent predicted actions
-        return output[:26]
+        return single_arm_discrete_actions_to_continuous(
+            actions,
+            self.voxel_size,
+            self.rotation_resolution,
+        )
         
 
     def act(self, step: int, observation: dict,
@@ -226,7 +208,7 @@ class RoboPromptAgentOnePerArm(LLMTrackingMixin, Agent):
         # only build task handler
         self.savedir = savedir
 
-        self.handler = create_task_handler(self.task_name)
+        self.handler = create_task_handler(self.task_name, self.model_config)
         
         if self.model_config.llm_call_style == "openai":
             print("using openai model")

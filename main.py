@@ -19,9 +19,11 @@ from pyrep.const import RenderMode
 
 from agents.roboprompt_agent_bimanual import RoboPromptAgentBimanual
 from agents.roboprompt_agent_oneperarm import RoboPromptAgentOnePerArm
+from agents.sequential_arms import SequentialArms
 from agents.leader_follower import LeaderFollower
 from agents.adaptive_leader_follower import AdaptiveLeaderFollower
 from agents.bestofn import BestOfN
+from agents.bestofnv2 import BestOfNV2
 from agents.arms_debate import ArmsDebate
 from agents.arms_debate_bestofn import ArmsDebateBestOfN
 from agents.leader_follower_conversational import LeaderFollowerConversational
@@ -33,7 +35,7 @@ from yarr.runners.independent_env_runner import IndependentEnvRunner
 from yarr.utils.stat_accumulator import SimpleAccumulator
 from yarr.utils.rollout_generator import RolloutGenerator
 
-from icl_utils import CAMERAS, SCENE_BOUNDS, ROTATION_RESOLUTION, VOXEL_SIZE, IMAGE_SIZE
+from icl_utils import CAMERAS, IMAGE_SIZE
 
 import torch
 from torch.multiprocessing import Manager
@@ -42,9 +44,11 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 agent_classes = {
     "RoboPromptAgentBimanual": RoboPromptAgentBimanual,
     "RoboPromptAgentOnePerArm": RoboPromptAgentOnePerArm,
+    "SequentialArms": SequentialArms,
     "LeaderFollower": LeaderFollower,
     "AdaptiveLeaderFollower": AdaptiveLeaderFollower,
     "BestOfN": BestOfN,
+    "BestOfNV2": BestOfNV2,
     "LeaderFollowerConversational": LeaderFollowerConversational,
     "ArmsDebate": ArmsDebate,
     "ArmsDebateBestOfN": ArmsDebateBestOfN,

@@ -9,7 +9,7 @@ from PIL import Image
 import os
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT_RIGHT, SYSTEM_PROMPT_LEFT
-from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+from icl_utils import CAMERAS, dual_arm_discrete_actions_to_continuous, fallback_dual_arm_sequence, fallback_single_arm_sequence, get_rotation_resolution, get_voxel_size, sanitize_single_arm_action
 import openai
 from openai import OpenAI
 
@@ -62,6 +62,8 @@ class LeaderFollowerConversational(Agent):
         self.task_name = task_name
         self.model_config = model_config
         self.leader = model_config.leader
+        self.voxel_size = get_voxel_size(model_config)
+        self.rotation_resolution = get_rotation_resolution(model_config)
 
     def _preprocess(self, obs, step, **kwargs):
         rgb_dict = {}
@@ -113,9 +115,7 @@ class LeaderFollowerConversational(Agent):
                 output_text_leader = self.llm_call(messages)
             except Exception as e:
                 print(f"LeaderFollowerConversational leader call failed: {e!r}")
-                return json.dumps(
-                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-                )
+                return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1))
             print(f"Prediction:", output_text_leader)
             output_list_leader = self._postprocess_single_arm(output_text_leader)
 
@@ -154,9 +154,7 @@ class LeaderFollowerConversational(Agent):
                 output_text_follower = self.llm_call(messages_follower)
             except Exception as e:
                 print(f"LeaderFollowerConversational follower call failed: {e!r}")
-                return json.dumps(
-                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-                )
+                return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1))
             print(f"Prediction:", output_text_follower)
             output_list_follower = self._postprocess_single_arm(output_text_follower)
 
@@ -188,9 +186,7 @@ class LeaderFollowerConversational(Agent):
                 output_text_leader_refined = self.llm_call(messages)
             except Exception as e:
                 print(f"LeaderFollowerConversational leader refinement failed: {e!r}")
-                return json.dumps(
-                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-                )
+                return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1))
             print(f"Refined Leader Prediction:", output_text_leader_refined)
             output_list_leader_refined = self._postprocess_single_arm(output_text_leader_refined)
 
@@ -218,9 +214,7 @@ class LeaderFollowerConversational(Agent):
                 output_text_follower_refined = self.llm_call(messages_follower)
             except Exception as e:
                 print(f"LeaderFollowerConversational follower refinement failed: {e!r}")
-                return json.dumps(
-                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-                )
+                return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1))
             print(f"Refined Follower Prediction:", output_text_follower_refined)
             output_list_follower_refined = self._postprocess_single_arm(output_text_follower_refined)
 
@@ -273,14 +267,14 @@ class LeaderFollowerConversational(Agent):
             if len(np.array(actions).shape) == 1:
                 actions = [actions]
         except Exception as e:
-            actions = [[57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+            actions = fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
             print(e)
             print('Error when parsing actions')
         output = []
         for action in actions:
-            if len(action) != 7:
-                action = [57, 49, 87, 0, 39, 0, 1]
-            output.append(action)
+            output.append(sanitize_single_arm_action(action, self.voxel_size, self.rotation_resolution))
+        if not output:
+            return fallback_single_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
         
         # get subsequent predicted actions
         return output[:26]
@@ -308,40 +302,14 @@ class LeaderFollowerConversational(Agent):
                             output_text = output_text[1:]  # Remove misaligned leading [
                         actions = np.array(json.loads('['+output_text+']')) # handle cases in which just external brackets are missing
         except Exception as e:
-            actions = [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+            actions = fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1)
             print(e)
             print('Error when parsing actions')
-        if len(np.array(actions).shape) == 1:
-            actions = [actions]
-        output = []
-        for action in actions:
-            if len(action) != 7*2: # predicting bimanual action directly for now
-                action = [57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1]
-            temp_actions = []
-            for i in range(2): # because two arms
-                arm_action = action[i*7:(i+1)*7]
-                trans_indicies = np.array(arm_action[:3])
-                rot_and_grip_indicies = np.array(arm_action[3:6])
-                is_gripper_open = 1 if arm_action[6] >= 0.5 else 0
-
-                bounds = SCENE_BOUNDS
-                res = (bounds[3:] - bounds[:3]) / 100
-                attention_coordinate = bounds[:3] + res * trans_indicies + res / 2
-                quat = discrete_euler_to_quaternion(rot_and_grip_indicies)
-                
-                continuous_action = np.concatenate([
-                    attention_coordinate,
-                    quat,
-                    [is_gripper_open],
-                    [1],
-                ])
-                temp_actions.append(continuous_action)
-            
-            temp_actions = np.concatenate(temp_actions, axis=0)
-            output.append(temp_actions)
-
-        # get subsequent predicted actions
-        return output[:26]
+        return dual_arm_discrete_actions_to_continuous(
+            actions,
+            self.voxel_size,
+            self.rotation_resolution,
+        )
         
     def act(self, step: int, observation: dict,
             deterministic=False, **kwargs) -> ActResult:
@@ -377,7 +345,7 @@ class LeaderFollowerConversational(Agent):
         # only build task handler
         self.savedir = savedir
 
-        self.handler = create_task_handler(self.task_name)
+        self.handler = create_task_handler(self.task_name, self.model_config)
         
         if self.model_config.llm_call_style == "openai":
             print("using openai model")

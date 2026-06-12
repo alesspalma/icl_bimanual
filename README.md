@@ -1,31 +1,76 @@
-# BiCICLe (ICL Bimanual)
+# Bimanual Robot Manipulation via Multi-Agent In-Context Learning
 
-Codebase for **BiCICLe** (Bimanual Coordinated In-Context Learning): training-free in-context bimanual manipulation in [RLBench](https://github.com/stepjam/RLBench), with leader-follower coordination, **ArmsDebate** iterative refinement, and **BestOfN** selection. The repo also includes **RICL**, a retrieval-augmented VLA baseline built on [Pi0-FAST](https://github.com/Physical-Intelligence/openpi). Legacy `RoboPrompt*` agent names are kept only as baseline labels for comparability.
+<p align="center">
+  <a href="https://arxiv.org/abs/2604.20348"><img src="https://img.shields.io/badge/arXiv-2604.20348-b31b1b.svg" alt="arXiv"></a>
+  <a href="https://huggingface.co/datasets/alesspalma/icl_bimanual_data"><img src="https://img.shields.io/badge/Dataset-Hugging%20Face-yellow.svg" alt="Dataset"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+</p>
 
-**Evaluated on 13 bimanual RLBench tasks:**
-`bimanual_dual_push_buttons` · `bimanual_handover_item` · `bimanual_handover_item_easy` · `bimanual_lift_ball` · `bimanual_lift_tray` · `bimanual_pick_laptop` · `bimanual_pick_plate` · `bimanual_push_box` · `bimanual_put_bottle_in_fridge` · `bimanual_put_item_in_drawer` · `bimanual_straighten_rope` · `bimanual_sweep_to_dustpan` · `bimanual_take_tray_out_of_oven`
+<p align="center">
+  <strong>Alessio Palma, Indro Spinelli, Vignesh Prasad, Luca Scofano,<br>
+  Yufeng Jin, Georgia Chalvatzaki, Fabio Galasso</strong>
+</p>
 
----
+<p align="center">
+  <a href="https://arxiv.org/abs/2604.20348"><strong>Paper</strong></a> |
+  <a href="https://huggingface.co/datasets/alesspalma/icl_bimanual_data"><strong>Dataset</strong></a>
+</p>
 
-## Table of Contents
+<p align="center">
+  <img src="assets/teaser.png" width="92%" alt="BiCICLe overview">
+</p>
 
-1. [Repository Structure](#repository-structure)
-2. [Installation](#installation)
-   - [icl_bimanual conda environment](#1-icl_bimanual-conda-environment)
-   - [openpi venv (RICL only)](#2-openpi-venv-ricl-only)
-3. [Generating Data](#generating-data)
-4. [Agents & Methods](#agents--methods)
-5. [Running Baselines (LLM/VLM agents)](#running-baselines-llmvlm-agents)
-   - [Prepare ICL demonstrations](#prepare-icl-demonstrations)
-   - [Evaluate all tasks](#evaluate-all-tasks)
-6. [Running RICL](#running-ricl)
-   - [Prepare RICL demo pools](#1-prepare-ricl-demo-pools)
-   - [Calibrate max distance](#2-calibrate-max-distance-recommended)
-   - [Start the policy server](#3-start-the-policy-server)
-   - [Run evaluation](#4-run-evaluation)
-   - [Full pipeline script](#5-full-pipeline-test_riclsh)
-7. [Configuration Reference](#configuration-reference)
-8. [Results & Logs](#results--logs)
+This repository contains the official implementation of **BiCICLe** (**Bi**manual
+**C**oordinated **I**n-**C**ontext **Le**arning), a training-free framework that
+uses standard language models for few-shot bimanual manipulation. BiCICLe casts
+bimanual control as a multi-agent leader-follower problem, decomposing each
+joint action into sequential, conditioned single-arm predictions. The framework
+also supports Arms' Debate refinement and LLM-as-judge Best-of-N selection.
+On the TWIN benchmark, BiCICLe achieves up to **71.1% average success rate**,
+outperforming the strongest training-free baseline by 6.7 percentage points.
+
+BiCICLe is evaluated on all 13 tasks of the
+[TWIN](https://arxiv.org/abs/2407.00278) benchmark and on novel simulation and
+real-world tasks. The repository also includes RoboPrompt and KAT baselines,
+ablation agents, and a retrieval-augmented VLA baseline based on
+[Pi0-FAST](https://github.com/Physical-Intelligence/openpi).
+
+## Contents
+
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Dataset](#dataset)
+- [Agents and Methods](#agents-and-methods)
+- [Running LLM/VLM Agents](#running-llmvlm-agents)
+- [Running RICL](#running-ricl)
+- [Configuration Reference](#configuration-reference)
+- [Results and Logs](#results-and-logs)
+- [Citation](#citation)
+
+## Quick Start
+
+After completing the installation and downloading the dataset, set `ROOT` in
+`form_icl_demonstrations.py` to `<repository>/generated_data/train`, then run:
+
+```bash
+conda activate icl_bimanual
+export OPENAI_API_KEY="your-api-key"
+
+# Build text ICL demonstrations from the downloaded training split.
+python form_icl_demonstrations.py
+
+# Evaluate one task with the base BiCICLe agent.
+xvfb-run -a -s "-screen 0 1280x1024x24" python main.py \
+    method.name=LeaderFollower \
+    model.llm_call_style=openai \
+    model.name=gpt-5-mini \
+    rlbench.tasks=[bimanual_push_box] \
+    rlbench.task_name=bimanual_push_box \
+    rlbench.demo_path="$PWD/generated_data/test" \
+    framework.logdir="$PWD/logs" \
+    framework.eval_episodes=100 \
+    rlbench.headless=True
+```
 
 ---
 
@@ -48,11 +93,14 @@ icl_bimanual/
 │   ├── kat_agent_bimanual.py
 │   ├── kat_agent_oneperarm.py
 │   ├── leader_follower.py
+│   ├── adaptive_leader_follower.py
+│   ├── sequential_arms.py
 │   ├── leader_follower_conversational.py
 │   ├── vlm_leader_follower.py
 │   ├── arms_debate.py
 │   ├── arms_debate_bestofn.py
 │   ├── bestofn.py
+│   ├── bestofnv2.py
 │   └── ...
 ├── ricl_openpi/                    # Pi0-FAST model + RICL policy server
 │   ├── scripts/serve_policy_ricl_bimanual.py
@@ -157,11 +205,42 @@ git lfs pull
 
 ---
 
-## Generating Data
+## Dataset
 
-Data generation uses the RLBench dataset generator. You need **training data** (used as the ICL/RICL demo pool) and **test data** (used for evaluation).
+The train and test demonstrations used in the paper are available on
+[Hugging Face](https://huggingface.co/datasets/alesspalma/icl_bimanual_data).
+Download them into `generated_data/`, which is the default location expected by
+the repository scripts:
 
-Default amounts: **100 training episodes** and **25 test episodes** per task.
+```bash
+pip install -U huggingface_hub
+hf download alesspalma/icl_bimanual_data \
+    --repo-type dataset \
+    --local-dir generated_data
+```
+
+The resulting layout should contain:
+
+```text
+generated_data/
+├── train/   # ICL demonstration pool
+└── test/    # evaluation episodes
+```
+
+Alternatively, clone the dataset repository with Git LFS:
+
+```bash
+git lfs install
+git clone https://huggingface.co/datasets/alesspalma/icl_bimanual_data generated_data
+```
+
+### Generating Data from Scratch
+
+Data generation uses the RLBench dataset generator. You need **training data**
+(used as the ICL/RICL demonstration pool) and **test data** (used for
+evaluation).
+
+The paper uses **100 training episodes and 100 test episodes per task**.
 
 ```bash
 conda activate icl_bimanual
@@ -179,12 +258,12 @@ DISPLAY=:0.0 python dataset_generator.py \
 mv /path/to/generated_data/train/bimanual_push_box/variation0 \
    /path/to/generated_data/train/bimanual_push_box/all_variations
 
-# Generate TEST data (25 episodes per task)
+# Generate TEST data (100 episodes per task)
 DISPLAY=:0.0 python dataset_generator.py \
     --tasks=bimanual_push_box \
     --save_path=/path/to/generated_data/test \
     --renderer=opengl \
-    --episodes_per_task=25 \
+    --episodes_per_task=100 \
     --processes=1 \
     --variations=1 \
     --all_variations=False
@@ -198,7 +277,7 @@ your training data directory.
 
 ---
 
-## Agents & Methods
+## Agents and Methods
 
 | Agent class | Description |
 |---|---|
@@ -208,15 +287,18 @@ your training data directory.
 | `KATAgentOnePerArm` | KAT one-per-arm variant |
 | `VLMLeaderFollower` | VLM-based leader-follower: right arm leads, left arm follows |
 | `LeaderFollower` | Base BiCICLe leader-follower pipeline |
+| `AdaptiveLeaderFollower` | Selects the leader arm from the ICL demonstrations once per episode |
+| `SequentialArms` | Shared-LLM dimensionality ablation with two sequential 7D arm predictions |
 | `ArmsDebate` | BiCICLe + iterative symmetric refinement |
 | `BestOfN` | BiCICLe + N candidate sampling with LLM-as-judge selection |
+| `BestOfNV2` | Best-of-N leader selection followed by Best-of-N follower selection |
 | `ArmsDebateBestOfN` | Combined strategy: ArmsDebate candidates + BestOfN selection |
 | `LeaderFollowerConversational` | Conversational refinement ablation (appendix setting) |
 | `RICLAgent` | **RICL**: Pi0-FAST VLA with DINOv2-based retrieval augmentation |
 
 ---
 
-## Running Baselines (LLM/VLM agents)
+## Running LLM/VLM Agents
 
 ### Prepare ICL demonstrations
 
@@ -249,7 +331,7 @@ conda activate icl_bimanual
 export OPENAI_API_KEY=your_key    # required for OpenAI models
 
 xvfb-run -a -s "-screen 0 1280x1024x24" python main.py \
-    method.name=RoboPromptAgentOnePerArm \
+    method.name=LeaderFollower \
     model.llm_call_style=openai \
     model.name=gpt-5-mini \
     rlbench.tasks=[bimanual_push_box] \
@@ -258,7 +340,7 @@ xvfb-run -a -s "-screen 0 1280x1024x24" python main.py \
     rlbench.demo_path=/path/to/generated_data/test \
     framework.gpu=0 \
     framework.logdir=/path/to/logs \
-    framework.eval_episodes=25 \
+    framework.eval_episodes=100 \
     rlbench.headless=True \
     framework.repeat_eval=3
 ```
@@ -479,11 +561,11 @@ framework:
 
 ---
 
-## Results & Logs
+## Results and Logs
 
 After evaluation, results are saved in two places:
 
-1. **Per-task text logs** — `redirections/<method>/<agent>/<task>.txt`  
+1. **Per-task text logs** — `redirections/<llm_call_style>/<agent>/<task>.txt`
    Full stdout including per-episode outcomes and the final success rate summary.
 
 2. **YARR metric logs** — `logs/<task>/`  
@@ -497,6 +579,32 @@ tail -5 redirections/openai/RoboPromptAgentOnePerArm/bimanual_push_box.txt
 # RICL
 tail -5 redirections/ricl/RICLAgent/bimanual_push_box.txt
 ```
+
+---
+
+## Citation
+
+If you use this code or dataset, please cite:
+
+```bibtex
+@misc{palma2026bimanual,
+  title         = {Bimanual Robot Manipulation via Multi-Agent In-Context Learning},
+  author        = {Palma, Alessio and Spinelli, Indro and Prasad, Vignesh and
+                   Scofano, Luca and Jin, Yufeng and Chalvatzaki, Georgia and
+                   Galasso, Fabio},
+  year          = {2026},
+  eprint        = {2604.20348},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.RO},
+  url           = {https://arxiv.org/abs/2604.20348}
+}
+```
+
+## License
+
+This project is released under the [MIT License](LICENSE). Vendored components
+under `RLBench/`, `PyRep/`, `YARR/`, and `ricl_openpi/` retain their respective
+licenses.
 
 ---
 

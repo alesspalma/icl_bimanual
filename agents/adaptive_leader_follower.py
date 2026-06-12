@@ -6,7 +6,7 @@ import numpy as np
 
 from agents.leader_follower import LeaderFollower
 from form_icl_demonstrations import SYSTEM_PROMPT_LEFT, SYSTEM_PROMPT_RIGHT
-from icl_utils import CAMERAS
+from icl_utils import CAMERAS, fallback_dual_arm_sequence
 
 
 LEADER_SELECTOR_SYSTEM_PROMPT = """You have to choose the leader arm for a bimanual Franka Panda leader-follower controller.
@@ -158,9 +158,7 @@ class AdaptiveLeaderFollower(LeaderFollower):
             output_text_leader = self.llm_call(messages)
         except Exception as e:
             print(f"AdaptiveLeaderFollower leader call failed: {e!r}")
-            return json.dumps(
-                [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-            )
+            return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1))
         print("Prediction:", output_text_leader)
         output_list_leader = self._postprocess_single_arm(output_text_leader)
 
@@ -201,9 +199,7 @@ class AdaptiveLeaderFollower(LeaderFollower):
             output_text_follower = self.llm_call(messages)
         except Exception as e:
             print(f"AdaptiveLeaderFollower follower call failed: {e!r}")
-            return json.dumps(
-                [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-            )
+            return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution, length=1))
         print("Prediction:", output_text_follower)
         output_list_follower = self._postprocess_single_arm(output_text_follower)
 

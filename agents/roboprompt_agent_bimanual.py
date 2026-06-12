@@ -8,7 +8,7 @@ from PIL import Image
 import os
 from json import JSONDecodeError
 from form_icl_demonstrations import create_task_handler, SYSTEM_PROMPT
-from icl_utils import SCENE_BOUNDS, ROTATION_RESOLUTION, discrete_euler_to_quaternion, CAMERAS
+from icl_utils import CAMERAS, dual_arm_discrete_actions_to_continuous, fallback_dual_arm_sequence, get_rotation_resolution, get_voxel_size
 import openai
 from openai import OpenAI
 from agents.llm_tracking import LLMTrackingMixin
@@ -68,6 +68,8 @@ class RoboPromptAgentBimanual(LLMTrackingMixin, Agent):
         self.device = 'cuda'
         self.task_name = task_name
         self.model_config = model_config
+        self.voxel_size = get_voxel_size(model_config)
+        self.rotation_resolution = get_rotation_resolution(model_config)
         
     def _preprocess(self, obs, step, **kwargs):
         rgb_dict = {}
@@ -116,9 +118,7 @@ class RoboPromptAgentBimanual(LLMTrackingMixin, Agent):
                 output_text = self.llm_call(messages)
             except Exception as e:
                 print(f"RoboPromptAgentBimanual call failed: {e!r}")
-                return json.dumps(
-                    [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
-                )
+                return json.dumps(fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution))
             print(f"Prediction:", output_text)
             return output_text
 
@@ -136,40 +136,14 @@ class RoboPromptAgentBimanual(LLMTrackingMixin, Agent):
                 else:
                     actions = np.array(json.loads(output_text))
         except Exception as e:
-            actions = [[57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1] for _ in range(26)]
+            actions = fallback_dual_arm_sequence(self.voxel_size, self.rotation_resolution)
             print(e)
             print('Error when parsing actions')
-        if len(np.array(actions).shape) == 1:
-            actions = [actions]
-        output = []
-        for action in actions:
-            if len(action) != 7*2:
-                action = [57, 49, 87, 0, 39, 0, 1, 57, 49, 87, 0, 39, 0, 1]
-            temp_actions = []
-            for i in range(2): # because two arms
-                arm_action = action[i*7:(i+1)*7]
-                trans_indicies = np.array(arm_action[:3])
-                rot_and_grip_indicies = np.array(arm_action[3:6])
-                is_gripper_open = 1 if arm_action[6] >= 0.5 else 0
-
-                bounds = SCENE_BOUNDS
-                res = (bounds[3:] - bounds[:3]) / 100
-                attention_coordinate = bounds[:3] + res * trans_indicies + res / 2
-                quat = discrete_euler_to_quaternion(rot_and_grip_indicies)
-                
-                continuous_action = np.concatenate([
-                    attention_coordinate,
-                    quat,
-                    [is_gripper_open],
-                    [1],
-                ])
-                temp_actions.append(continuous_action)
-            
-            temp_actions = np.concatenate(temp_actions, axis=0)
-            output.append(temp_actions)
-
-        # get subsequent predicted actions
-        return output[:26]
+        return dual_arm_discrete_actions_to_continuous(
+            actions,
+            self.voxel_size,
+            self.rotation_resolution,
+        )
         
 
     def act(self, step: int, observation: dict,
@@ -207,7 +181,7 @@ class RoboPromptAgentBimanual(LLMTrackingMixin, Agent):
         # only build task handler
         self.savedir = savedir
 
-        self.handler = create_task_handler(self.task_name)
+        self.handler = create_task_handler(self.task_name, self.model_config)
         
         if self.model_config.llm_call_style == "openai":
             print("using openai model")

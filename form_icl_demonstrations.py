@@ -16,7 +16,8 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 import json
 import open3d as o3d
-from icl_utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS
+from icl_utils import _image_to_float_array, normalize_quaternion, point_to_voxel_index, quaternion_to_discrete_euler, CAMERAS, SCENE_BOUNDS, scale_voxel_index
+from icl_utils import get_demonstrations_dir, get_rotation_resolution, get_voxel_size
 from helpers.demo_loading_utils import keypoint_discovery
 from helpers.utils import visualize_point_cloud_to_file, visualize_point_cloud_live
 
@@ -29,16 +30,19 @@ SYSTEM_PROMPT_LEFT = "You are the left arm of a bimanual Franka Panda robot with
 # discretize translation, rotation, gripper open
 def _get_action(
         obs_tp1,
-        obs_tm1):
+        obs_tm1,
+        voxel_size=100,
+        rotation_resolution=5):
     quat = normalize_quaternion(obs_tp1.gripper_pose[3:])
     if quat[-1] < 0:
         quat = -quat
-    disc_rot = quaternion_to_discrete_euler(quat)
+    disc_rot = quaternion_to_discrete_euler(quat, rotation_resolution)
     trans_indicies = []
     ignore_collisions = int(obs_tm1.ignore_collisions)
 
     index = point_to_voxel_index(
-        obs_tp1.gripper_pose[:3])
+        obs_tp1.gripper_pose[:3],
+        voxel_size)
     trans_indicies.extend(index.tolist())
 
     rot_and_grip_indicies = disc_rot.tolist()
@@ -87,7 +91,9 @@ def _add_keypoints_to_replay(
         epis_path_depth,
         epis_path_char,
         sim_name_to_real_name,
-        use_gt_pos
+        use_gt_pos,
+        voxel_size,
+        rotation_resolution
     ):
     prev_action = None
     cur_index = i
@@ -108,27 +114,27 @@ def _add_keypoints_to_replay(
         print(f"WARNING objects not found: {set(sim_name_to_real_name.values()) - set(mask_id_to_real_name.values())}")
 
     if use_gt_pos:
-        avg_coord = form_obs_gt(demo, cur_index, sim_name_to_real_name)
+        avg_coord = form_obs_gt(demo, cur_index, sim_name_to_real_name, voxel_size)
     else:
         # avg_coord = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
         # avg_coord = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
-        avg_coord = form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict)
+        avg_coord = form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict, voxel_size)
     # sort avg_coord alphabetically by key
     avg_coord = str({k: eval(avg_coord)[k] for k in sorted(eval(avg_coord))})
     
     ####### for statistics
-    avg_coord_gt = eval(form_obs_gt(demo, cur_index, sim_name_to_real_name))
-    avg_coord_std = eval(form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict))
-    avg_coord_concat = eval(form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict))
-    avg_coord_prune = eval(form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict))
+    avg_coord_gt = eval(form_obs_gt(demo, cur_index, sim_name_to_real_name, voxel_size))
+    avg_coord_std = eval(form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict, voxel_size))
+    avg_coord_concat = eval(form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict, voxel_size))
+    avg_coord_prune = eval(form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict, voxel_size))
 
     diff_gt_std = {}
     diff_gt_conc = {}
     diff_gt_prune = {}
     for key in avg_coord_gt:
-        diff_gt_std[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_std[key]))
-        diff_gt_conc[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_concat[key]))
-        diff_gt_prune[key] = np.linalg.norm(np.array(avg_coord_gt[key]) - np.array(avg_coord_prune[key]))
+        diff_gt_std[key] = voxel_distance_to_metric(avg_coord_gt[key], avg_coord_std[key], voxel_size)
+        diff_gt_conc[key] = voxel_distance_to_metric(avg_coord_gt[key], avg_coord_concat[key], voxel_size)
+        diff_gt_prune[key] = voxel_distance_to_metric(avg_coord_gt[key], avg_coord_prune[key], voxel_size)
     #######
 
     buffer.append(avg_coord) # appends center coordinates of the objects in the scene
@@ -137,15 +143,27 @@ def _add_keypoints_to_replay(
         obs_tp1 = demo[keypoint]
         action_right = _get_action(
             obs_tp1.right,
-            obs_tp1.right)
+            obs_tp1.right,
+            voxel_size,
+            rotation_resolution)
         action_left = _get_action(
             obs_tp1.left,
-            obs_tp1.left)
+            obs_tp1.left,
+            voxel_size,
+            rotation_resolution)
 
         actions.append(action_right + action_left)
     
     buffer.append(actions) # appends actions taken at each keyframe
     return diff_gt_std, diff_gt_conc, diff_gt_prune
+
+
+def voxel_distance_to_metric(voxel_a, voxel_b, voxel_size):
+    voxel_a = np.asarray(voxel_a, dtype=float)
+    voxel_b = np.asarray(voxel_b, dtype=float)
+    voxel_to_metric = (SCENE_BOUNDS[3:] - SCENE_BOUNDS[:3]) / voxel_size
+    return np.linalg.norm((voxel_a - voxel_b) * voxel_to_metric)
+
 
 def _is_stopped(demo, i, obs, stopped_buffer, delta=0.1):
     next_is_not_final = i == (len(demo) - 2)
@@ -178,7 +196,7 @@ def _keypoint_discovery(demo, delta=0.1) -> List[int]:
     #print('Found %d keypoints.' % len(episode_keypoints), episode_keypoints)
     return episode_keypoints
 
-def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use_gt_pos):
+def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use_gt_pos, voxel_size, rotation_resolution):
     total_num_keypoints = 0
     buffer = []
     task_root = os.path.join(dataset_root, task_name, 'all_variations', 'episodes')
@@ -201,7 +219,8 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use
 
         tmp = []
         diff_gt_std, diff_gt_conc, diff_gt_prune = _add_keypoints_to_replay(
-            tmp, 0, demo, episode_keypoints, epis_path_depth, epis_path_char, sim_name_to_real_name, use_gt_pos)
+            tmp, 0, demo, episode_keypoints, epis_path_depth, epis_path_char,
+            sim_name_to_real_name, use_gt_pos, voxel_size, rotation_resolution)
         buffer.append(tmp)
 
         # accumulate statistics
@@ -212,35 +231,36 @@ def get_stored_demos(dataset_root, task_name, amount, sim_name_to_real_name, use
 
     # average distances
     for key in tot_diff_gt_std:
-        tot_diff_gt_std[key] = round(tot_diff_gt_std[key] / amount, 3)
-        tot_diff_gt_conc[key] = round(tot_diff_gt_conc[key] / amount, 3)
-        tot_diff_gt_prune[key] = round(tot_diff_gt_prune[key] / amount, 3)
+        tot_diff_gt_std[key] = float(round(tot_diff_gt_std[key] / amount, 3))
+        tot_diff_gt_conc[key] = float(round(tot_diff_gt_conc[key] / amount, 3))
+        tot_diff_gt_prune[key] = float(round(tot_diff_gt_prune[key] / amount, 3))
 
     print("Average number of steps: ", sum([len(each[1]) for each in buffer])/len(buffer))
     print("Task", task_name, "\navg diff gt std:", tot_diff_gt_std, "\navg diff gt conc:", tot_diff_gt_conc, "\navg diff gt prune:", tot_diff_gt_prune, "\n")
     return buffer
 
-def form_obs_gt(demo, cur_index, sim_name_to_real_name):
+def form_obs_gt(demo, cur_index, sim_name_to_real_name, voxel_size):
     real_name_to_avg_coord = {}
     for sim_name, real_name in sim_name_to_real_name.items():
         obj_pos = demo[cur_index].misc['object_positions'][sim_name]
-        real_name_to_avg_coord[real_name] = obj_pos
+        real_name_to_avg_coord[real_name] = list(scale_voxel_index(obj_pos, voxel_size))
     return str(real_name_to_avg_coord)
 
-def form_obs_gt_test(sim_name_to_real_name):
+def form_obs_gt_test(sim_name_to_real_name, voxel_size):
     # Extract gt object positions from live simulation
     object_positions = {}
     for sim_name in sim_name_to_real_name:
         obj = Object.get_object(sim_name)
         position = obj.get_position()
-        voxel = point_to_voxel_index(position)
+        voxel = point_to_voxel_index(position, voxel_size)
         object_positions[sim_name_to_real_name[sim_name]] = list(voxel)
     return str(object_positions)
 
 def form_obs(
     mask_dict,
     mask_id_to_real_name,
-    point_cloud_dict):
+    point_cloud_dict,
+    voxel_size):
     
     # convert object id to char and average and discretize point cloud per object
     uniques = np.unique(np.concatenate(list(mask_dict.values()), axis=0))
@@ -259,13 +279,14 @@ def form_obs(
 
         avg_point = sum(avg_point_list) / len(avg_point_list) # take average of the centers
         real_name = mask_id_to_real_name[mask_id]
-        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point, voxel_size))
     return str(real_name_to_avg_coord)
 
 def form_obs_concatenate_clouds(
     mask_dict,
     mask_id_to_real_name,
-    point_cloud_dict):
+    point_cloud_dict,
+    voxel_size):
     # Merge point clouds from all cameras first, then compute center
     
     uniques = np.unique(np.concatenate(list(mask_dict.values()), axis=0))
@@ -288,14 +309,15 @@ def form_obs_concatenate_clouds(
         merged_points = np.concatenate(all_object_points, axis=0)
         avg_point = np.mean(merged_points, axis=0)
         real_name = mask_id_to_real_name[mask_id]
-        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point, voxel_size))
     
     return str(real_name_to_avg_coord)
 
 def form_obs_prune_points(
     mask_dict,
     mask_id_to_real_name,
-    point_cloud_dict):
+    point_cloud_dict,
+    voxel_size):
     # Merge point clouds from all cameras first, then remove crowded areas and compute center
     
     uniques = np.unique(np.concatenate(list(mask_dict.values()), axis=0))
@@ -321,16 +343,32 @@ def form_obs_prune_points(
         pc = pc.voxel_down_sample(voxel_size=0.02)
         avg_point = np.mean(np.asarray(pc.points), axis=0)
         real_name = mask_id_to_real_name[mask_id]
-        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point))
+        real_name_to_avg_coord[real_name] = list(point_to_voxel_index(avg_point, voxel_size))
     
     return str(real_name_to_avg_coord)
 
 class base_task_handler:
-    def __init__(self, sim_name_to_real_name):
+    def __init__(
+        self,
+        sim_name_to_real_name,
+        voxel_size=100,
+        rotation_resolution=5,
+        demonstrations_dir=None,
+    ):
         self.sim_name_to_real_name = sim_name_to_real_name
         self.save_root = os.path.join(ROOT, type(self).__name__)
+        self.voxel_size = int(voxel_size)
+        self.rotation_resolution = float(rotation_resolution)
+        self.demonstrations_dirname = get_demonstrations_dir(
+            voxel_size=self.voxel_size,
+            rotation_resolution=self.rotation_resolution,
+        ) if demonstrations_dir is None else demonstrations_dir
         self.num_demos = 10
-        print(f"Task handler {type(self).__name__} using demonstrations from {self.save_root}")
+        print(
+            f"Task handler {type(self).__name__} using demonstrations from "
+            f"{os.path.join(self.save_root, self.demonstrations_dirname)}"
+            f" (voxel_size={self.voxel_size}, rotation_resolution={self.rotation_resolution})"
+        )
         # random.seed(42) # TODO
 
     def get_user_prompt(self, mask_dict, mask_id_to_sim_name, point_cloud_dict, agent):
@@ -338,19 +376,19 @@ class base_task_handler:
         mask_id_to_real_name = {mask_id: self.sim_name_to_real_name[name] for mask_id, name in mask_id_to_sim_name.items()
                             if name in self.sim_name_to_real_name}
         if agent.model_config.use_gt_obj_pos:
-            obs = form_obs_gt_test(self.sim_name_to_real_name)
+            obs = form_obs_gt_test(self.sim_name_to_real_name, self.voxel_size)
         else:
             # obs = form_obs(mask_dict, mask_id_to_real_name, point_cloud_dict)
             # obs = form_obs_concatenate_clouds(mask_dict, mask_id_to_real_name, point_cloud_dict)
-            obs = form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict)
+            obs = form_obs_prune_points(mask_dict, mask_id_to_real_name, point_cloud_dict, self.voxel_size)
         # sort obs alphabetically by key
         obs = str({k: eval(obs)[k] for k in sorted(eval(obs))})
 
         # during evaluation, randomly choose one batch of 10 demonstrations from the saved demonstrations
-        path = random.choice(glob.glob(os.path.join(self.save_root, "demonstrations", "*.txt")))
+        path = random.choice(glob.glob(os.path.join(self.save_root, self.demonstrations_dirname, "*.txt")))
         demonstration = open(path, "r").read()
 
-        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "BestOfN", "LeaderFollower", "AdaptiveLeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
+        if type(agent).__name__ in ["RoboPromptAgentOnePerArm", "SequentialArms", "BestOfN", "BestOfNV2", "LeaderFollower", "AdaptiveLeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
             examples = demonstration.split(", {") # split over episodes
             right_demonstration = ""
             left_demonstration = ""
@@ -369,14 +407,22 @@ class base_task_handler:
                 right_demonstration += objects_dict + ">" + str(right_actions) + ", "
                 left_demonstration += objects_dict + ">" + str(left_actions) + ", "
             
-            if type(agent).__name__ in ["BestOfN", "LeaderFollower", "AdaptiveLeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
+            if type(agent).__name__ in ["BestOfN", "BestOfNV2", "LeaderFollower", "AdaptiveLeaderFollower", "LeaderFollowerConversational", "ArmsDebate", "ArmsDebateBestOfN"]:
                 return right_demonstration + obs + ">", left_demonstration + obs + ">", demonstration + obs + ">"
             return right_demonstration + obs + ">", left_demonstration + obs + ">"
 
         return demonstration + obs + ">"
     
     def save_in_context_demonstrations(self, use_gt_pos):
-        train_demos = get_stored_demos(ROOT, type(self).__name__, 100, self.sim_name_to_real_name, use_gt_pos)
+        train_demos = get_stored_demos(
+            ROOT,
+            type(self).__name__,
+            100,
+            self.sim_name_to_real_name,
+            use_gt_pos,
+            self.voxel_size,
+            self.rotation_resolution,
+        )
         # iterate over 100 demonstrations, each time take 10 demonstrations
         for i, start_idx in enumerate(range(0, len(train_demos), self.num_demos)):
             if start_idx + self.num_demos <= len(train_demos):
@@ -384,7 +430,7 @@ class base_task_handler:
                 for epi in train_demos[start_idx:start_idx+self.num_demos]:
                     output += f"{epi[0]}>{epi[1]}, "
 
-                d = os.path.join(ROOT, type(self).__name__, f"demonstrations")
+                d = os.path.join(ROOT, type(self).__name__, self.demonstrations_dirname)
                 os.makedirs(d, exist_ok=True)
                 with open(os.path.join(d, f'{i}.txt'), "w") as f:
                     f.write(output)
@@ -392,32 +438,32 @@ class base_task_handler:
 #####################################################
 
 class bimanual_push_box(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "cube": "box",
             # "target": "target area" # target is not captured by mask cameras for some reason, but task is easy so not really needed
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_dual_push_buttons(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "target_button_wrap0": "button 1", # pressed by right arm
             "target_button_wrap1": "button 2", # pressed by left arm
             "target_button_wrap2": "button 3" # distractor
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_put_bottle_in_fridge(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "fridge_base_visual": "fridge",
             "bottle_visual": "bottle"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_handover_item(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "item0": "item 1", # item to be handed over
             "item1": "item 2",
@@ -425,92 +471,92 @@ class bimanual_handover_item(base_task_handler):
             "item3": "item 4",
             "item4": "item 5"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_handover_item_easy(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "item": "item",
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_lift_ball(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "ball": "ball",
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_lift_tray(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "tray_visual": "tray",
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_pick_laptop(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "lid_visual": "laptop",
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_pick_plate(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "plate_visual": "plate",
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_straighten_rope(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "tail": "rope",
             "head_tail": "target 1",
             "head_target": "target 2"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_sweep_to_dustpan(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "sweep_to_dustpan_broom_visual": "broom",
             "Dustpan_5": "dustpan"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_take_tray_out_of_oven(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "oven_frame0": "oven",
             # "tray_visual": "tray", # tray is not visible in the first frame because it's inside the oven
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_put_item_in_drawer(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "drawer_frame": "drawer",
             "item": "item"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_close_jar(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "jar_lid0": "lid",
             "jar0": "jar 1",
             "jar1": "jar 2",
             "handover": "handover"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 class bimanual_take_item_out_of_box(base_task_handler):
-    def __init__(self):
+    def __init__(self, **kwargs):
         sim_name_to_real_name = {
             "box_lid": "box"
         }
-        super().__init__(sim_name_to_real_name)
+        super().__init__(sim_name_to_real_name, **kwargs)
 
 task_name_to_handler = {
                         "bimanual_handover_item": bimanual_handover_item,
@@ -530,18 +576,40 @@ task_name_to_handler = {
                         "bimanual_take_item_out_of_box": bimanual_take_item_out_of_box,
                         }
 
-def create_task_handler(task_name):
-    return task_name_to_handler[task_name]()
+def create_task_handler(task_name, model_config=None, **kwargs):
+    if model_config is not None:
+        kwargs.setdefault("voxel_size", get_voxel_size(model_config))
+        kwargs.setdefault("rotation_resolution", get_rotation_resolution(model_config))
+        kwargs.setdefault("demonstrations_dir", get_demonstrations_dir(model_config))
+    return task_name_to_handler[task_name](**kwargs)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate in-context learning examples')
     parser.add_argument('--gt_pos', action='store_true', help='Use ground truth object positions (default: False)')
+    parser.add_argument('--voxel_size', type=int, default=100, help='Translation voxel grid size.')
+    parser.add_argument('--rotation_resolution', type=float, default=5, help='Rotation bin size in degrees.')
+    parser.add_argument('--demonstrations_dir', default=None, help='Output demo-cache directory name.')
+    parser.add_argument(
+        '--tasks',
+        nargs='*',
+        default=None,
+        choices=sorted(task_name_to_handler.keys()),
+        help='Optional subset of RLBench task names to regenerate.',
+    )
     args = parser.parse_args()
     
     use_gt_positions = args.gt_pos
     if use_gt_positions:
         print("Using GT object positions")
     
-    for class_name in task_name_to_handler.values():
-        handler = class_name()
+    selected_handlers = (
+        [task_name_to_handler[task_name] for task_name in args.tasks]
+        if args.tasks else task_name_to_handler.values()
+    )
+    for class_name in selected_handlers:
+        handler = class_name(
+            voxel_size=args.voxel_size,
+            rotation_resolution=args.rotation_resolution,
+            demonstrations_dir=args.demonstrations_dir,
+        )
         handler.save_in_context_demonstrations(use_gt_positions)
