@@ -593,9 +593,7 @@ If you use this code or dataset, please cite:
 ```bibtex
 @misc{palma2026bimanual,
   title         = {Bimanual Robot Manipulation via Multi-Agent In-Context Learning},
-  author        = {Palma, Alessio and Spinelli, Indro and Prasad, Vignesh and
-                   Scofano, Luca and Jin, Yufeng and Chalvatzaki, Georgia and
-                   Galasso, Fabio},
+  author        = {Alessio Palma and Indro Spinelli and Vignesh Prasad and Luca Scofano and Yufeng Jin and Georgia Chalvatzaki and Fabio Galasso},
   year          = {2026},
   eprint        = {2604.20348},
   archivePrefix = {arXiv},
