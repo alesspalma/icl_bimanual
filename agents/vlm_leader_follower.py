@@ -48,13 +48,14 @@ _RETRYABLE = (
 
 
 # ──────────────────── VLM call ────────────────────
-def vlm_call_openai(client, model_name, messages, max_retries=5):
+def vlm_call_openai(client, model_name, messages, service_tier=None, max_retries=5):
     """Send a multimodal (vision) request via the OpenAI-compatible API."""
     for attempt in range(max_retries):
         try:
             completion = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
+                **({"service_tier": service_tier} if service_tier else {}),
             )
             return completion.choices[0].message.content
         except _RETRYABLE as e:
@@ -376,8 +377,10 @@ class VLMLeaderFollower(Agent):
         if self.model_config.llm_call_style == "openai":
             print("Using OpenAI VLM")
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            service_tier = self.model_config.openai_service_tier
+            print(f"using OpenAI {service_tier} service tier")
             self.vlm_call = lambda messages: vlm_call_openai(
-                client, self.model_config.name, messages
+                client, self.model_config.name, messages, service_tier
             )
         elif self.model_config.llm_call_style == "huggingface":
             from transformers import AutoProcessor, AutoModelForImageTextToText

@@ -4,6 +4,7 @@ method:
 model:
     llm_call_style: "openai"
     name: "gpt-5-mini"
+    openai_service_tier: "priority"  # "default" or "priority"
     leader: "right"  # "right" or "left"
     use_gt_obj_pos: False  # whether to use ground truth object positions at test time
     track_llm_stats: False  # when True, track and report LLM token usage and latency per episode

@@ -4,6 +4,7 @@
 log_dir="/media/nvme/palma/icl_bimanual/logs"
 test_data_path="/media/nvme/palma/icl_bimanual/generated_data/test"
 llm_call_style="openai"
+openai_service_tier="${OPENAI_SERVICE_TIER:-priority}"
 agent="BestOfNV2"
 export CUDA_VISIBLE_DEVICES=0
 
@@ -38,6 +39,7 @@ for method in "${methods[@]}"; do
     python main.py \
         method.name="$agent" \
         model.llm_call_style="$llm_call_style" \
+        model.openai_service_tier="$openai_service_tier" \
         model.name=gpt-5-mini \
         rlbench.tasks="[$method]" \
         rlbench.task_name="$method" \

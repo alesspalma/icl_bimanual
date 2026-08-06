@@ -7,6 +7,7 @@
 log_dir="/home/alessio/Desktop/icl_bimanual/logs/llm_stats"
 test_data_path="/home/alessio/Desktop/icl_bimanual/generated_data/test"
 llm_call_style="openai"
+openai_service_tier="${OPENAI_SERVICE_TIER:-priority}"
 model_name="gpt-5-mini"
 task="bimanual_lift_ball"
 eval_episodes=100
@@ -25,6 +26,7 @@ for agent in "${agents[@]}"; do
     python main.py \
         method.name="$agent" \
         model.llm_call_style="$llm_call_style" \
+        model.openai_service_tier="$openai_service_tier" \
         model.name="$model_name" \
         model.track_llm_stats=True \
         rlbench.tasks="[$task]" \

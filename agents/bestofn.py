@@ -25,12 +25,13 @@ _RETRYABLE = (
 )
 
 
-def openai_call(client, model_name, messages, max_retries=5):
+def openai_call(client, model_name, messages, service_tier=None, max_retries=5):
     for attempt in range(max_retries):
         try:
             completion = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
+                **({"service_tier": service_tier} if service_tier else {}),
             )
             content = completion.choices[0].message.content or ""
             usage = {
@@ -450,8 +451,10 @@ class BestOfN(LLMTrackingMixin, Agent):
         if self.model_config.llm_call_style == "openai":
             print("using openai model")
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            service_tier = self.model_config.openai_service_tier
+            print(f"using OpenAI {service_tier} service tier")
             raw_call = lambda messages: openai_call(
-                client, self.model_config.name, messages
+                client, self.model_config.name, messages, service_tier
             )
         elif self.model_config.llm_call_style == "huggingface":
             from transformers import AutoModelForCausalLM, AutoTokenizer

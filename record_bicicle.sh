@@ -8,6 +8,7 @@ log_dir="/home/alessio/Desktop/icl_bimanual/paper_videos/bicicle"
 test_data_path="/home/alessio/Desktop/icl_bimanual/generated_data/test"
 agent="LeaderFollower"
 llm_call_style="openai"
+openai_service_tier="${OPENAI_SERVICE_TIER:-priority}"
 model_name="gpt-5-mini"
 
 tasks=("bimanual_lift_ball" "bimanual_straighten_rope" "bimanual_take_tray_out_of_oven")
@@ -26,6 +27,7 @@ for task in "${tasks[@]}"; do
     python main.py \
         method.name="$agent" \
         model.llm_call_style="$llm_call_style" \
+        model.openai_service_tier="$openai_service_tier" \
         model.name="$model_name" \
         rlbench.tasks="[$task]" \
         rlbench.task_name="$task" \

@@ -6,6 +6,7 @@ log_dir="/media/nvme/palma/icl_bimanual/logs"
 train_data_path="/media/nvme/palma/icl_bimanual/generated_data/train"
 test_data_path="/media/nvme/palma/icl_bimanual/generated_data/test"
 llm_call_style="openai"
+openai_service_tier="${OPENAI_SERVICE_TIER:-priority}"
 agent="LeaderFollower"
 voxel_size=200
 rotation_resolution=2.5
@@ -56,6 +57,7 @@ for task in "${tasks[@]}"; do
     python main.py \
         method.name="$agent" \
         model.llm_call_style="$llm_call_style" \
+        model.openai_service_tier="$openai_service_tier" \
         model.name=gpt-5-mini \
         model.leader=right \
         model.voxel_size="$voxel_size" \
