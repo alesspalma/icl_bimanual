@@ -30,8 +30,8 @@ uses standard language models for few-shot bimanual manipulation. BiCICLe casts
 bimanual control as a multi-agent leader-follower problem, decomposing each
 joint action into sequential, conditioned single-arm predictions. The framework
 also supports Arms' Debate refinement and LLM-as-judge Best-of-N selection.
-On the TWIN benchmark, BiCICLe achieves up to **71.1% average success rate**,
-outperforming the strongest training-free baseline by 6.7 percentage points.
+On the TWIN benchmark, BiCICLe achieves **70.5% average success rate**,
+outperforming the strongest training-free baseline by 6.1 percentage points.
 
 BiCICLe is evaluated on all 13 tasks of the
 [TWIN](https://arxiv.org/abs/2407.00278) benchmark and on novel simulation and
