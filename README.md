@@ -16,6 +16,7 @@
 </p>
 
 <p align="center">
+  <a href="https://alesspalma.github.io/bicicle"><strong>Project page</strong></a> |
   <a href="https://arxiv.org/abs/2604.20348"><strong>Paper</strong></a> |
   <a href="https://huggingface.co/datasets/alesspalma/icl_bimanual_data"><strong>Dataset</strong></a>
 </p>
